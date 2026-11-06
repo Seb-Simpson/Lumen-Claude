@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; manifest-src 'self'">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <title>Lumen — Watch, share and discover videos</title>
+  <meta name="description" content="Lumen is a lightweight video sharing site. Watch music, gaming, science, coding and sports videos, and upload your own.">
+  <link rel="canonical" href="https://seb-simpson.github.io/Lumen-Claude/">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0f0f10" media="(prefers-color-scheme: dark)">
+  <meta name="color-scheme" content="light dark">
+
+  <!-- Open Graph / Twitter -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Lumen">
+  <meta property="og:title" content="Lumen — Watch, share and discover videos">
+  <meta property="og:description" content="A lightweight video sharing site built with plain HTML, CSS and JavaScript.">
+  <meta property="og:url" content="https://seb-simpson.github.io/Lumen-Claude/">
+  <meta property="og:image" content="https://seb-simpson.github.io/Lumen-Claude/assets/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Lumen — Watch, share and discover videos">
+  <meta name="twitter:description" content="A lightweight video sharing site built with plain HTML, CSS and JavaScript.">
+  <meta name="twitter:image" content="https://seb-simpson.github.io/Lumen-Claude/assets/og-image.png">
+
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="assets/icon-192.png">
+  <link rel="manifest" href="manifest.webmanifest">
+
+  <!-- Applies the saved theme before first paint to avoid a flash. -->
+  <script src="src/js/theme-init.js"></script>
+  <link rel="stylesheet" href="src/css/base.css">
+  <link rel="stylesheet" href="src/css/layout.css">
+  <link rel="stylesheet" href="src/css/components.css">
+  <link rel="stylesheet" href="src/css/pages.css">
+  <script type="module" src="src/js/app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header id="site-header" class="site-header"></header>
+  <div class="shell">
+    <nav id="sidebar" class="sidebar" aria-label="Primary"></nav>
+    <div id="sidebar-backdrop" class="sidebar-backdrop" hidden></div>
+    <div class="content">
+      <main id="main" tabindex="-1">
+        <noscript>
+          <div class="page narrow">
+            <h1>JavaScript required</h1>
+            <p>Lumen is a client-side app. Please enable JavaScript to watch and upload videos.</p>
+          </div>
+        </noscript>
+      </main>
+      <footer id="site-footer" class="site-footer"></footer>
+    </div>
+  </div>
+  <div id="toasts" class="toasts" role="status" aria-live="polite" aria-atomic="false"></div>
+</body>
+</html>

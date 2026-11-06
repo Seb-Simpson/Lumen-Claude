@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-bKZfNY4IaLYzR7YzYmZ6ErJs30g+rAhaWKeobaYw1tk='; style-src 'unsafe-inline'">
+  <title>Page not found - Lumen</title>
+  <meta name="robots" content="noindex">
+  <!-- Served by GitHub Pages for any unknown path, so it is fully self-contained
+       (relative asset paths would break on nested URLs). -->
+  <style>
+    :root { --bg:#fff; --text:#0f0f10; --muted:#5c5c63; --surface:#f2f2f3; --accent:#c2361c; --accent-text:#fff; }
+    :root.dark { --bg:#0f0f10; --text:#f1f1f3; --muted:#aeaeb6; --surface:#222226; --accent:#ff7a59; --accent-text:#1a0904; }
+    @media (prefers-color-scheme: dark) { :root:not(.light) { color-scheme: dark; } }
+    body { margin:0; min-height:100vh; display:grid; place-items:center; background:var(--bg); color:var(--text);
+      font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; text-align:center; padding:16px; }
+    .art { font-size:clamp(5rem,18vw,9rem); font-weight:900; line-height:1; letter-spacing:-.05em;
+      background:linear-gradient(135deg,var(--accent),#7c3aed); -webkit-background-clip:text; background-clip:text; color:transparent; }
+    p { color:var(--muted); }
+    a { display:inline-block; margin:6px; padding:10px 18px; border-radius:20px; font-weight:600; text-decoration:none; }
+    .primary { background:var(--accent); color:var(--accent-text); }
+    .secondary { background:var(--surface); color:var(--text); }
+    a:focus-visible { outline:3px solid #1a56c4; outline-offset:2px; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="art" aria-hidden="true">404</div>
+    <h1>This page isn't available</h1>
+    <p>The link may be broken, or the page may have been removed.</p>
+    <a class="primary" href="/" data-base="">Go to Lumen home</a>
+    <a class="secondary" href="/#/help" data-base="#/help">Get help</a>
+  </main>
+  <script>(function(){var s=location.pathname.split('/').filter(Boolean);var base=/\.github\.io$/.test(location.hostname)&&s.length?'/'+s[0]+'/':'/';document.querySelectorAll('a[data-base]').forEach(function(a){a.href=base+a.getAttribute('data-base');});try{var t=JSON.parse(localStorage.getItem('lumen:settings')||'{}').theme||'system';var d=t==='dark'||(t==='system'&&matchMedia('(prefers-color-scheme: dark)').matches);if(d)document.documentElement.className='dark';}catch(e){}})();</script>
+</body>
+</html>

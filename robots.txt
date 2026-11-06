@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://seb-simpson.github.io/Lumen-Claude/sitemap.xml
