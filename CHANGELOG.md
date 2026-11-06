@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-06
+
+### Added
+- Playlists: create from the watch page, plus a Playlists page, a playlist page (rename, reorder, remove, delete), "Play all" with a side panel, continuous playback and a Library shelf.
+- Continuous integration: `tests/run-headless.sh` runs the browser tests in headless Chrome (no npm). The workflow tests every push and pull request and deploys only after tests pass.
+
+### Changed
+- Each sample video now has its own description, and the fake chapter lists are gone.
+- "Live" items are labelled "Live demo" and explain that they are recorded clips.
+- Sample clips are re-encoded with their caption at the top, clear of the player controls.
+
 ## [1.0.0] - 2026-11-06
 
 ### Added

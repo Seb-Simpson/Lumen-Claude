@@ -156,6 +156,7 @@ export function renderSidebar() {
       link('#/history', 'history', 'History'),
       link('#/watch-later', 'clock', 'Watch later'),
       link('#/liked', 'like', 'Liked videos'),
+      link('#/playlists', 'playlist', 'Playlists'),
       link('#/studio', 'studio', 'Your videos')),
     subs.length ? h('ul', { class: 'nav-section nav-subs' },
       h('li', { class: 'nav-heading' }, 'Subscriptions'),

@@ -8,6 +8,8 @@ import { videoCard } from '../components/videoCard.js';
 import { avatar, toast, emptyState, copyText, skeletonList } from '../components/ui.js';
 import { icon } from '../components/icons.js';
 import { navigate } from '../router.js';
+import { openSaveToPlaylist } from '../components/playlistDialog.js';
+import { playlistHref } from './playlists.js';
 
 export function subscribeButton(channel, { onChange } = {}) {
   const btn = h('button', { class: 'btn', type: 'button' });
@@ -54,6 +56,15 @@ export async function render(ctx) {
     .sort((a, b) => (b.channelId === video.channelId) - (a.channelId === video.channelId) || (b.category === video.category) - (a.category === video.category) || b.views - a.views)
     .slice(0, 12);
 
+  // Playing from a playlist (#/watch/id?list=pl-…): show it and play through it.
+  const plId = ctx.query.get('list');
+  const playlist = plId ? library.getPlaylist(plId) : null;
+  const plVideos = playlist?.videoIds.includes(video.id)
+    ? (await Promise.all(playlist.videoIds.map((vid) => getVideo(vid)))).filter(Boolean)
+    : null;
+  if (!ctx.isActive()) return;
+  const plIndex = plVideos ? plVideos.findIndex((v) => v.id === video.id) : -1;
+
   // --- Player ---
   let lastSave = 0;
   let autoplayTimer = null;
@@ -70,8 +81,13 @@ export async function render(ctx) {
     },
     onEnded: () => {
       library.savePosition(video.id, 0);
-      const next = upNext[0];
-      if (!getSettings().autoplay || !next) return;
+      // Playlists always continue to their next video; otherwise follow the autoplay setting.
+      const next = plVideos ? plVideos[plIndex + 1] : upNext[0];
+      if (!next || (!plVideos && !getSettings().autoplay)) {
+        if (plVideos) { mount(autoplayNote, h('span', {}, `End of playlist “${playlist.name}”.`)); autoplayNote.hidden = false; }
+        return;
+      }
+      const nextPath = plVideos ? playlistHref(playlist.id, next.id).slice(1) : `/watch/${encodeURIComponent(next.id)}`;
       let n = 5;
       const cancel = h('button', { class: 'btn btn-ghost btn-sm', type: 'button', onClick: () => { clearInterval(autoplayTimer); autoplayNote.hidden = true; } }, 'Cancel');
       const label = h('span', {});
@@ -79,7 +95,7 @@ export async function render(ctx) {
       autoplayNote.hidden = false;
       const tick = () => {
         label.textContent = `Up next in ${n}s: ${next.title} `;
-        if (n-- <= 0) { clearInterval(autoplayTimer); navigate(`/watch/${encodeURIComponent(next.id)}`); }
+        if (n-- <= 0) { clearInterval(autoplayTimer); navigate(nextPath); }
       };
       tick();
       autoplayTimer = setInterval(tick, 1000);
@@ -116,6 +132,16 @@ export async function render(ctx) {
     laterBtn.setAttribute('aria-pressed', String(on));
     laterBtn.setAttribute('aria-label', on ? 'Remove from Watch later' : 'Save to Watch later');
   };
+  const playlistBtn = h('button', { class: 'btn btn-secondary', type: 'button', aria: { haspopup: 'dialog' } },
+    icon('playlistAdd', { size: 20 }), h('span', {}, 'Playlist'));
+  const paintPlaylistBtn = () => {
+    const n = library.playlistsWith(video.id).length;
+    playlistBtn.setAttribute('aria-label', n ? `Save to playlist (in ${n} playlist${n === 1 ? '' : 's'})` : 'Save to playlist');
+    playlistBtn.classList.toggle('is-saved', n > 0);
+  };
+  playlistBtn.addEventListener('click', () => openSaveToPlaylist(video.id, { onChange: paintPlaylistBtn }));
+  paintPlaylistBtn();
+
   laterBtn.addEventListener('click', () => { const on = library.toggleWatchLater(video.id); paintLater(); toast(on ? 'Saved to Watch later' : 'Removed from Watch later'); });
   paintLater();
 
@@ -154,10 +180,36 @@ export async function render(ctx) {
           subscribeButton(channel, { onChange: paintSubs })),
         h('div', { class: 'watch-actions' },
           h('div', { class: 'segmented', role: 'group', aria: { label: 'Rate this video' } }, likeBtn, dislikeBtn),
-          shareBtn, laterBtn)),
+          shareBtn, laterBtn, playlistBtn)),
       desc,
       commentsSection(video.id)),
-    h('aside', { class: 'watch-side', aria: { label: 'Up next' } },
+    h('aside', { class: 'watch-side', aria: { label: plVideos ? 'Playlist and up next' : 'Up next' } },
+      plVideos ? playlistPanel(playlist, plVideos, plIndex) : null,
       h('h2', { class: 'side-title' }, 'Up next'),
       upNext.length ? h('div', { class: 'video-list compact' }, upNext.map((v) => videoCard(v, { layout: 'compact' }))) : h('p', { class: 'muted' }, 'Nothing else to watch yet.'))));
+}
+
+/** Side panel listing the playlist being played, with the current video highlighted. */
+function playlistPanel(playlist, vids, current) {
+  const items = vids.map((v, i) => {
+    const card = videoCard(v, { layout: 'compact' });
+    card.querySelectorAll(`a[href="#/watch/${encodeURIComponent(v.id)}"]`).forEach((a) => {
+      a.href = playlistHref(playlist.id, v.id);
+      if (i === current) a.setAttribute('aria-current', 'true');
+    });
+    return h('li', { class: `pl-item ${i === current ? 'current' : ''}` },
+      h('span', { class: 'pl-index', aria: { hidden: 'true' } }, i === current ? '▶' : String(i + 1)), card);
+  });
+  const panel = h('section', { class: 'pl-panel', aria: { labelledby: 'pl-panel-title' } },
+    h('div', { class: 'pl-panel-head' },
+      h('h2', { id: 'pl-panel-title' }, h('a', { href: `#/playlist/${encodeURIComponent(playlist.id)}` }, playlist.name)),
+      h('p', { class: 'muted small' }, `${current + 1} / ${vids.length}`)),
+    h('ol', { class: 'pl-list' }, items));
+  // Scroll only the list (not the page) so the current item is visible.
+  requestAnimationFrame(() => {
+    const list = panel.querySelector('.pl-list');
+    const cur = panel.querySelector('.pl-item.current');
+    if (list && cur) list.scrollTop = cur.offsetTop - list.offsetTop - 8;
+  });
+  return panel;
 }

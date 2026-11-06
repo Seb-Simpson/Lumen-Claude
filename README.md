@@ -9,12 +9,13 @@ Lumen is a video sharing website in the style of YouTube, built with plain HTML,
 ## Features
 
 - **Home:** a responsive grid of videos, category chips (All, Music, Gaming, Science, Coding, Sports, Live), a "Load more" button, loading skeletons and empty states.
-- **Watch:** a custom video player with play/pause, a seek bar, volume, speed, full screen and keyboard shortcuts. The page also has like/dislike, subscribe, share (copies the link), save to Watch later, an expandable description, comments with one level of replies and comment likes, an "Up next" list, remembered playback position and optional autoplay.
+- **Watch:** a custom video player with play/pause, a seek bar, volume, speed, full screen and keyboard shortcuts. The page also has like/dislike, subscribe, share (copies the link), save to Watch later or to a playlist, an expandable description, comments with one level of replies and comment likes, an "Up next" list, remembered playback position and optional autoplay.
 - **Search:** results sorted by relevance, upload date or view count, with filters for All, Videos, Live and Channels. The header search box shows suggestions as you type, after a short pause.
 - **Channels:** a banner, avatar, subscriber count, subscribe button, and Videos and About tabs.
 - **Upload and Studio:** drag and drop an MP4 or WebM file (up to 500 MB), and add a thumbnail, title, description, category and visibility. A progress bar shows the upload. Studio lists your videos so you can edit or delete them.
 - **Accounts:** sign up, sign in, sign out, and edit your profile (display name, bio, avatar initial and color).
 - **Library:** History, Liked videos, Watch later and a Subscriptions feed.
+- **Playlists:** create playlists from any video, then rename them, reorder or remove videos, or delete them. "Play all" plays a playlist in order: a side panel shows your place, and the next video starts on its own when one ends.
 - **Settings:** theme (light, dark or follow your device), default playback speed, autoplay, and a button to clear your watch history.
 - **Pages:** About, Privacy, Terms and Help, a keyboard shortcuts dialog (press `?`), and a styled 404 page.
 
@@ -33,17 +34,22 @@ You only need a web browser. Nothing gets installed on your computer.
    ```bash
    python3 -m http.server 8000
    ```
-6. To run the unit tests, add `/tests/` to the end of the preview address, for example `https://…-8000.app.github.dev/tests/`. The page shows how many tests passed.
+6. To run the unit tests, add `/tests/` to the end of the preview address, for example `https://…-8000.app.github.dev/tests/`. The page shows how many tests passed. GitHub also runs these tests automatically (see below).
 
 To stop the server, click in its terminal and press `Ctrl + C`.
 
 ## Publish with GitHub Pages
 
-The workflow in `.github/workflows/pages.yml` publishes the site every time you push to `main`. You need to turn Pages on once:
+The workflow in `.github/workflows/pages.yml` has two jobs:
+
+- **test** runs on every push and pull request. It checks that every file is served, then runs the unit tests in headless Chrome using `tests/run-headless.sh`, with no npm needed.
+- **deploy** publishes the site, but only for `main` and only when the tests pass. A failing test stops a broken version from going live.
+
+You need to turn Pages on once:
 
 1. On GitHub, open the repository and go to **Settings → Pages**.
 2. Under **Build and deployment → Source**, choose **GitHub Actions**.
-3. Open the **Actions** tab. If the "Deploy to GitHub Pages" run failed before you turned Pages on, open it and click **Re-run all jobs**. You can also push any new commit.
+3. Open the **Actions** tab. If the "Test and deploy" run failed before you turned Pages on, open it and click **Re-run all jobs**. You can also push any new commit.
 4. When the run turns green, your site is live at `https://<your-username>.github.io/<repository-name>/`. For this repository that is https://seb-simpson.github.io/Lumen-Claude/.
 
 All paths in the site are relative, so it works from a subfolder such as `/Lumen-Claude/`. If you rename the repository or use a custom domain, update the absolute URLs in `index.html` (the canonical, Open Graph and Twitter tags), `robots.txt` and `sitemap.xml`.
@@ -63,7 +69,7 @@ src/js/
   store.js              localStorage wrapper with events, quota handling and an in-memory fallback
   auth.js               Demo accounts (SHA-256 with a per-user salt, via Web Crypto)
   db.js                 IndexedDB storage for uploads, with an in-memory fallback
-  library.js            Per-user history, likes, watch later, subscriptions, playback positions
+  library.js            Per-user history, likes, watch later, subscriptions, playlists, playback positions
   videos.js             Combines seed videos and uploads into one catalog; channel lookup
   search.js             Search and sort functions (no DOM, so they're easy to test)
   theme.js              Light, dark and system themes
@@ -72,7 +78,7 @@ src/js/
   data/thumbs.js        Generated SVG thumbnails and banners
   components/           Header and sidebar (shell.js), player, comments, video card, icons, ui helpers
   views/                One file per page
-tests/                  Browser test runner (open /tests/)
+tests/                  Browser test runner (open /tests/); run-headless.sh runs it in CI
 ```
 
 ## Decisions and notes
@@ -83,6 +89,8 @@ tests/                  Browser test runner (open /tests/)
 - **No `innerHTML` for user text.** All UI is built with the `h()` helper, which adds strings as text nodes. Text inside generated SVGs is XML-escaped. The only markup-like strings are static icon paths.
 - **CSP.** `script-src 'self'` with no inline scripts. The theme is applied before the first paint by a small external script, `src/js/theme-init.js`. `404.html` has to work at any URL depth, so it inlines its style and a script that is allowed by its SHA-256 hash.
 - **Accessibility.** The site has a skip link, landmarks, labelled controls, visible focus rings and live regions for toasts and player status. Focus moves to each new page's heading on navigation, menus work with the arrow keys and Esc, and dialogs use the native `<dialog>` element. The color tokens were chosen for WCAG AA contrast in both themes, and `prefers-reduced-motion` turns animations off.
+- **"Live" videos are labelled as demos.** There is no streaming server, so items in the Live category are recorded clips. Cards say "Live demo", and the description explains it.
+- **Playlists always play through.** Inside a playlist the next video starts even when Autoplay is off, because "Play all" asks for that. Playlists are private to each account on the browser.
 - **Seed numbers.** View counts, likes and dates in the sample data are fixed fake values. Views you add are counted per browser.
 
 ## Keyboard shortcuts
@@ -106,7 +114,7 @@ tests/                  Browser test runner (open /tests/)
 - **Demo-only authentication.** Hashing in the browser stops passwords from being stored in plain text, but anyone with access to the device can read or change the data. Passwords can't be reset.
 - **Browser storage limits.** Large uploads can go over your browser's storage quota. When that happens, Lumen shows an error message. In some private browsing modes IndexedDB isn't available, so uploads only last until you close the tab.
 - **Hash URLs** (`#/watch/…`) don't get indexed as separate pages by search engines, and link previews show the site-wide Open Graph tags.
-- **Fake live streams.** "Live" videos are ordinary clips with a LIVE badge.
+- **No real live streaming.** "Live" videos are recorded clips, labelled as demos.
 - The duration of an upload is only shown if your browser can read the file's metadata.
 
 ## Adding a real backend later

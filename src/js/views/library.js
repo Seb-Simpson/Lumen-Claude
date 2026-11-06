@@ -6,6 +6,7 @@ import { getPublicVideos, getVideo, getChannel } from '../videos.js';
 import { videoCard } from '../components/videoCard.js';
 import { emptyState, pageTitle, skeletonList, toast, confirmDialog, avatar } from '../components/ui.js';
 import { icon } from '../components/icons.js';
+import { playlistTile } from './playlists.js';
 
 async function resolveIds(ids) {
   const out = await Promise.all(ids.map((id) => getVideo(id)));
@@ -85,20 +86,27 @@ export async function renderSubscriptions(ctx) {
 }
 
 export async function renderLibrary(ctx) {
-  ctx.setMeta('Library', 'Your history, liked videos and watch later list.');
+  ctx.setMeta('Library', 'Your history, playlists, liked videos and watch later list.');
   const shelf = (title, href, iconName, vids, emptyText) => h('section', { class: 'shelf' },
     h('div', { class: 'shelf-head' }, h('h2', {}, icon(iconName), ' ', title), h('a', { class: 'btn btn-ghost btn-sm', href }, 'See all')),
     vids.length ? h('div', { class: 'video-grid' }, vids.slice(0, 4).map((v) => videoCard(v))) : h('p', { class: 'muted' }, emptyText));
   const body = h('div', {}, skeletonList(3));
   mount(ctx.outlet, h('div', { class: 'page' }, pageTitle('Library'), body));
-  const [hist, liked, later] = await Promise.all([
+  const pls = library.playlists().slice(0, 4);
+  const [hist, liked, later, plFirsts] = await Promise.all([
     resolveIds(library.history().slice(0, 4).map((x) => x.id)),
     resolveIds(library.likedIds().reverse().slice(0, 4)),
     resolveIds(library.watchLater().slice(0, 4)),
+    resolveIds(pls.map((p) => p.videoIds[0]).filter(Boolean)),
   ]);
+  const firstById = new Map(plFirsts.map((v) => [v.id, v]));
   if (!ctx.isActive()) return;
   mount(body,
     shelf('History', '#/history', 'history', hist, 'Videos you watch will appear here.'),
     shelf('Watch later', '#/watch-later', 'clock', later, 'Save videos to watch them later.'),
+    h('section', { class: 'shelf' },
+      h('div', { class: 'shelf-head' }, h('h2', {}, icon('playlist'), ' ', 'Playlists'), h('a', { class: 'btn btn-ghost btn-sm', href: '#/playlists' }, 'See all')),
+      pls.length ? h('div', { class: 'video-grid' }, pls.map((p) => playlistTile(p, firstById.get(p.videoIds[0]))))
+        : h('p', { class: 'muted' }, 'Use the Playlist button under any video to start a playlist.')),
     shelf('Liked videos', '#/liked', 'like', liked, 'Videos you like will appear here.'));
 }

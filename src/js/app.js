@@ -15,6 +15,7 @@ import { render as settings } from './views/settings.js';
 import { renderLogin, renderSignup, renderProfile } from './views/account.js';
 import { renderLibrary, renderHistory, renderLiked, renderWatchLater, renderSubscriptions } from './views/library.js';
 import { renderPage, renderNotFound } from './views/pages.js';
+import { renderPlaylists, renderPlaylist } from './views/playlists.js';
 
 applyTheme();
 watchSystemTheme(renderHeader);
@@ -35,6 +36,8 @@ route('/history', renderHistory);
 route('/liked', renderLiked);
 route('/watch-later', renderWatchLater);
 route('/subscriptions', renderSubscriptions);
+route('/playlists', renderPlaylists);
+route('/playlist/:id', renderPlaylist);
 route('/about', renderPage('about'));
 route('/privacy', renderPage('privacy'));
 route('/terms', renderPage('terms'));

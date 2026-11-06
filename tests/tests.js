@@ -8,7 +8,8 @@ import { createAuth, hashPassword, generateSalt, validateSignup } from '../src/j
 import { matchRoute, parseHash } from '../src/js/router.js';
 import { validateVideoFile, MAX_BYTES } from '../src/js/views/upload.js';
 import { thumbnailSVG, wrapTitle } from '../src/js/data/thumbs.js';
-import { SEED_VIDEOS, CHANNELS, seedComments } from '../src/js/data/seed.js';
+import { SEED_VIDEOS, CHANNELS, seedComments, LIVE_NOTE } from '../src/js/data/seed.js';
+import { createLibrary, validatePlaylistName, MAX_PLAYLIST_NAME } from '../src/js/library.js';
 
 const tests = [];
 const test = (group, name, fn) => tests.push({ group, name, fn });
@@ -229,6 +230,74 @@ test('Seed data', 'at least 24 videos across 8+ channels', () => {
 test('Seed data', 'seed comments are deterministic', () => {
   eq(seedComments('v-aurora'), seedComments('v-aurora'));
   assert(seedComments('v-aurora').length >= 2);
+});
+
+test('Seed data', 'every video has its own description; live ones are labelled', () => {
+  assert(SEED_VIDEOS.every((v) => v.description && !v.description.startsWith('undefined')), 'missing summary');
+  eq(new Set(SEED_VIDEOS.map((v) => v.description)).size, SEED_VIDEOS.length, 'descriptions are unique');
+  assert(SEED_VIDEOS.filter((v) => v.live).every((v) => v.description.includes(LIVE_NOTE)), 'live note');
+  assert(SEED_VIDEOS.filter((v) => !v.live).every((v) => !v.description.includes(LIVE_NOTE)));
+});
+
+/* ---------- Playlists ---------- */
+const freshLibrary = (user = 'u1') => {
+  const s = createStore(memoryStorage());
+  let who = user;
+  const lib = createLibrary(s, () => who);
+  return { lib, switchUser: (u) => { who = u; } };
+};
+test('Playlists', 'validatePlaylistName trims and limits length', () => {
+  eq(validatePlaylistName('  Road   trip  '), { name: 'Road trip' });
+  assert(validatePlaylistName('   ').error);
+  assert(validatePlaylistName('x'.repeat(MAX_PLAYLIST_NAME + 1)).error);
+  eq(validatePlaylistName('x'.repeat(MAX_PLAYLIST_NAME)).name.length, MAX_PLAYLIST_NAME);
+});
+test('Playlists', 'create, add, toggle, remove', () => {
+  const { lib } = freshLibrary();
+  const pl = lib.createPlaylist('Favourites', 'v1');
+  eq(lib.getPlaylist(pl.id).videoIds, ['v1']);
+  eq(lib.togglePlaylistVideo(pl.id, 'v2'), true);
+  eq(lib.togglePlaylistVideo(pl.id, 'v2'), false);
+  lib.togglePlaylistVideo(pl.id, 'v3');
+  eq(lib.getPlaylist(pl.id).videoIds, ['v1', 'v3']);
+  lib.removeFromPlaylist(pl.id, 'v1');
+  eq(lib.getPlaylist(pl.id).videoIds, ['v3']);
+  eq(lib.playlistsWith('v3'), [pl.id]);
+  eq(lib.playlistsWith('v1'), []);
+});
+test('Playlists', 'newest playlist first, rename and delete', () => {
+  const { lib } = freshLibrary();
+  const a = lib.createPlaylist('A');
+  const b = lib.createPlaylist('B');
+  eq(lib.playlists().map((p) => p.id), [b.id, a.id]);
+  eq(lib.renamePlaylist(a.id, '  Renamed ').name, 'Renamed');
+  let threw = false; try { lib.renamePlaylist(a.id, ''); } catch { threw = true; }
+  assert(threw, 'empty rename rejected');
+  lib.deletePlaylist(b.id);
+  eq(lib.playlists().map((p) => p.name), ['Renamed']);
+  threw = false; try { lib.togglePlaylistVideo(b.id, 'v1'); } catch { threw = true; }
+  assert(threw, 'editing a deleted playlist throws');
+});
+test('Playlists', 'reorder and next-video lookup', () => {
+  const { lib } = freshLibrary();
+  const pl = lib.createPlaylist('Order');
+  ['a', 'b', 'c'].forEach((v) => lib.togglePlaylistVideo(pl.id, v));
+  lib.moveInPlaylist(pl.id, 'c', -1);
+  eq(lib.getPlaylist(pl.id).videoIds, ['a', 'c', 'b']);
+  lib.moveInPlaylist(pl.id, 'a', -1); // already first: no-op
+  lib.moveInPlaylist(pl.id, 'b', 1);  // already last: no-op
+  eq(lib.getPlaylist(pl.id).videoIds, ['a', 'c', 'b']);
+  eq(lib.nextInPlaylist(pl.id, 'a'), 'c');
+  eq(lib.nextInPlaylist(pl.id, 'b'), null);
+  eq(lib.nextInPlaylist(pl.id, 'zzz'), null);
+});
+test('Playlists', 'are private to each user', () => {
+  const { lib, switchUser } = freshLibrary('alice');
+  lib.createPlaylist('Alice only');
+  switchUser('bob');
+  eq(lib.playlists(), []);
+  switchUser('alice');
+  eq(lib.playlists().length, 1);
 });
 
 /* ---------- Runner ---------- */
