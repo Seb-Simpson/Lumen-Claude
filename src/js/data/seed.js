@@ -63,13 +63,47 @@ const RAW = [
   ['v-gear', 'trailpeak', 'Sports', 'Trail Gear That Survived 1,000 Miles', ['gear', 'review', 'running']],
 ];
 
-const DESCRIPTIONS = {
-  Music: 'Recorded in one take with no overdubs. Headphones recommended.\n\nTracklist and gear list are in the pinned comment. If you enjoyed this, consider subscribing for a new session every Friday.',
-  Gaming: 'In this video we break down the design decisions behind the moments players remember.\n\nChapters:\n0:00 Intro\n1:30 The setup\n5:10 Why it works\n9:00 What we can learn',
-  Science: 'Everything in this video can be tried safely at home with adult supervision.\n\nSources and further reading are linked in the community tab. Corrections welcome in the comments!',
-  Coding: 'Follow along: all code from this lesson is plain HTML, CSS and JavaScript, no build step required.\n\n0:00 Why it matters\n2:00 The basics\n6:30 Common mistakes\n9:15 Recap',
-  Sports: 'Drills, analysis and real examples from the pitch, track and trail.\n\nShare this with a teammate who needs it, and let us know what to break down next.',
+// One-line summary per video, followed by a short channel-style footer.
+const SUMMARIES = {
+  'v-aurora': 'A slow-building ambient set recorded live in a glass greenhouse at dawn, with two synths and a looper.',
+  'v-basslines': 'From Motown to modern pop: five basslines that rewrote how songs groove, and the tricks you can steal from each.',
+  'v-modular': 'We wire up a small modular synth one module at a time, explaining oscillators, filters and envelopes as we go.',
+  'v-lofi-radio': 'Soft beats for focused work. Pop it in a background tab, grab a drink and get into the zone.',
+  'v-rainy-jazz': 'Brushed drums, warm upright bass and the sound of rain on the window. A mix for late evenings.',
+  'v-sunrise': 'Bright, unhurried chillhop to start the day gently.',
+  'v-speedrun': 'How a decade-old record finally fell: the routing, the glitches and the community that made it happen.',
+  'v-pixelart': 'Why a handful of pixels can look like a face: a look at readability, limited palettes and clever shading.',
+  'v-levels': 'What makes a level easy to read and fun to explore, using examples from classic and indie games.',
+  'v-devstream': 'Day three of building a roguelike from scratch: today it is procedural rooms and the first enemy.',
+  'v-boiling': 'Water actually boils at a lower temperature up high, so your pasta cooks slower, not faster. Here is why.',
+  'v-maillard': 'The browning reaction behind toast, steak and coffee, explained with a toaster and a timer.',
+  'v-nonnewton': 'Cornstarch, water and a speaker: three experiments with fluids that turn solid when you hit them.',
+  'v-rocket': 'Combustion chambers, nozzles and why rocket exhaust is shaped the way it is, without the jargon.',
+  'v-orbits': 'Why going faster can make you slower in orbit, and other surprises, explained with simple sketches.',
+  'v-launch': 'Countdown, liftoff and stage separation, narrated as it happens.',
+  'v-js-modules': 'import, export and how browsers load ES modules natively, so you can skip the bundler.',
+  'v-css-grid': 'Rows, columns, areas and auto-fill: the few CSS Grid features that cover most real layouts.',
+  'v-a11y': 'Make buttons and links that work for everyone: semantics, keyboard support and visible focus styles.',
+  'v-git': 'Rebasing explained step by step, plus how to undo things safely when it goes wrong.',
+  'v-shell': 'Small shell habits that save time every day: history search, brace expansion, xargs and more.',
+  'v-pressing': 'How a coordinated high press wins the ball back, drawn out move by move on a tactics board.',
+  'v-sprint': 'Posture, arm drive and ground contact: a four-week plan to sprint faster.',
+  'v-matchday': 'Team news, likely line-ups and the key matchups to watch before kickoff.',
+  'v-ultra': 'Blisters, bonking and a missed cut-off: an honest look at my first 100 km race and what I would change.',
+  'v-bouldering': 'Quiet feet, precise toes and trusting your smears: the footwork basics that make every climb easier.',
+  'v-gear': 'Shoes, packs and layers that lasted 1,000 trail miles, and the ones that did not.',
 };
+
+const FOOTERS = {
+  Music: 'Headphones recommended. If you enjoyed this, subscribe for a new session every Friday.',
+  Gaming: 'Tell us which game we should break down next in the comments.',
+  Science: 'Try the experiments safely with an adult nearby. Corrections are welcome in the comments!',
+  Coding: 'All code is plain HTML, CSS and JavaScript, with no build step required.',
+  Sports: 'Share this with a teammate who needs it, and let us know what to cover next.',
+};
+
+// Lumen has no streaming server, so "live" items are recorded demo clips.
+export const LIVE_NOTE = 'Live demo: Lumen has no streaming server, so this is a recorded clip shown as an example of a live video.';
 
 const NOW = Date.parse('2026-11-01T12:00:00Z');
 
@@ -84,7 +118,7 @@ export const SEED_VIDEOS = RAW.map(([id, channelId, category, title, tags, live 
     title,
     tags,
     live,
-    description: DESCRIPTIONS[category],
+    description: [SUMMARIES[id], FOOTERS[category], live ? LIVE_NOTE : ''].filter(Boolean).join('\n\n'),
     src: sample.src,
     duration: sample.duration,
     views: Math.floor(1500 + rnd() * rnd() * 4_800_000),

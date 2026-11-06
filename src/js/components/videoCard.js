@@ -11,7 +11,7 @@ export function videoCard(video, { layout = 'grid', extra = null, showChannelAva
   const badge = video.live
     ? h('span', { class: 'badge badge-live' }, 'LIVE')
     : video.duration ? h('span', { class: 'badge' }, formatDuration(video.duration)) : null;
-  const meta = [video.live ? 'Streaming now' : formatViews(video.views), timeAgo(video.createdAt)];
+  const meta = [video.live ? 'Live demo' : formatViews(video.views), timeAgo(video.createdAt)];
   if (video.visibility && video.visibility !== 'public') meta.push(video.visibility === 'private' ? 'Private' : 'Unlisted');
 
   const thumb = h('a', { class: 'thumb', href, tabindex: '-1', aria: { hidden: 'true' } }, img, badge);

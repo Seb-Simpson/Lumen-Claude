@@ -128,7 +128,7 @@ export async function render(ctx) {
   const descText = h('p', { class: 'desc-text' }, video.description || 'No description.');
   const descToggle = h('button', { class: 'link-btn desc-toggle', type: 'button', aria: { expanded: 'false', controls: 'desc' } }, 'Show more');
   const desc = h('div', { class: 'description collapsed', id: 'desc' },
-    h('p', { class: 'desc-meta' }, h('strong', {}, video.live ? 'Streaming now' : `${video.views.toLocaleString()} views`), ' • ',
+    h('p', { class: 'desc-meta' }, h('strong', {}, video.live ? 'Live demo (recorded clip)' : `${video.views.toLocaleString()} views`), ' • ',
       h('time', { datetime: video.createdAt, title: formatDate(video.createdAt) }, `${formatDate(video.createdAt)} (${timeAgo(video.createdAt)})`),
       ' • ', h('a', { href: `#/?c=${encodeURIComponent(video.category)}` }, `#${video.category}`)),
     descText, descToggle);
