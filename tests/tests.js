@@ -1,0 +1,256 @@
+// Minimal in-browser test runner + Lumen unit tests. No Node required.
+// Results are also exposed on window.__TEST_RESULTS__ for headless runs.
+
+import { escapeHTML, formatCount, formatViews, formatDuration, timeAgo, debounce, h } from '../src/js/utils.js';
+import { createStore, memoryStorage } from '../src/js/store.js';
+import { tokenize, searchVideos, sortVideos, searchChannels } from '../src/js/search.js';
+import { createAuth, hashPassword, generateSalt, validateSignup } from '../src/js/auth.js';
+import { matchRoute, parseHash } from '../src/js/router.js';
+import { validateVideoFile, MAX_BYTES } from '../src/js/views/upload.js';
+import { thumbnailSVG, wrapTitle } from '../src/js/data/thumbs.js';
+import { SEED_VIDEOS, CHANNELS, seedComments } from '../src/js/data/seed.js';
+
+const tests = [];
+const test = (group, name, fn) => tests.push({ group, name, fn });
+const assert = (cond, msg = 'Assertion failed') => { if (!cond) throw new Error(msg); };
+const eq = (a, b, msg) => {
+  const sa = JSON.stringify(a), sb = JSON.stringify(b);
+  if (sa !== sb) throw new Error(`${msg ? `${msg}: ` : ''}expected ${sb}, got ${sa}`);
+};
+const rejects = async (p, re) => {
+  try { await p; } catch (e) { if (re && !re.test(e.message)) throw new Error(`Wrong error: ${e.message}`); return; }
+  throw new Error('Expected promise to reject');
+};
+
+/* ---------- Escaping & DOM safety ---------- */
+test('Escaping', 'escapes HTML special characters', () => {
+  eq(escapeHTML(`<script>alert("x")</script> & 'y'`), '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt; &amp; &#39;y&#39;');
+});
+test('Escaping', 'handles null/undefined/numbers', () => {
+  eq(escapeHTML(null), ''); eq(escapeHTML(undefined), ''); eq(escapeHTML(42), '42');
+});
+test('Escaping', 'h() renders strings as text, not markup', () => {
+  const el = h('p', {}, '<img src=x onerror=alert(1)>');
+  eq(el.children.length, 0, 'no child elements');
+  eq(el.textContent, '<img src=x onerror=alert(1)>');
+});
+test('Escaping', 'thumbnail SVG escapes titles', () => {
+  const svg = thumbnailSVG({ id: 'x', title: '</text><script>alert(1)</script>', category: 'Music' });
+  assert(!svg.includes('<script>'), 'raw script tag leaked into SVG');
+  assert(svg.includes('&lt;script&gt;'));
+});
+
+/* ---------- Formatting ---------- */
+test('Formatting', 'formatCount abbreviates', () => {
+  eq([0, 999, 1000, 1234, 15_500, 999_999, 1_000_000, 2_560_000, 3_200_000_000].map(formatCount),
+    ['0', '999', '1K', '1.2K', '15.5K', '999.9K', '1M', '2.5M', '3.2B']);
+});
+test('Formatting', 'formatViews pluralizes', () => {
+  eq(formatViews(1), '1 view'); eq(formatViews(0), '0 views'); eq(formatViews(1500), '1.5K views');
+});
+test('Formatting', 'formatDuration', () => {
+  eq([0, 5, 65, 600, 3599, 3600, 3661, -3, NaN].map(formatDuration), ['0:00', '0:05', '1:05', '10:00', '59:59', '1:00:00', '1:01:01', '0:00', '0:00']);
+});
+test('Formatting', 'timeAgo', () => {
+  const now = Date.parse('2026-06-01T00:00:00Z');
+  const ago = (s) => timeAgo(now - s * 1000, now);
+  eq(ago(10), 'just now');
+  eq(ago(60), '1 minute ago');
+  eq(ago(3 * 3600), '3 hours ago');
+  eq(ago(86400), '1 day ago');
+  eq(ago(14 * 86400), '2 weeks ago');
+  eq(ago(65 * 86400), '2 months ago');
+  eq(ago(400 * 86400), '1 year ago');
+  eq(timeAgo('not a date', now), '');
+});
+test('Formatting', 'debounce runs once with the last args', async () => {
+  const calls = [];
+  const d = debounce((x) => calls.push(x), 20);
+  d(1); d(2); d(3);
+  await new Promise((r) => setTimeout(r, 50));
+  eq(calls, [3]);
+});
+test('Formatting', 'wrapTitle limits lines', () => {
+  const lines = wrapTitle('one two three four five six seven eight nine ten eleven twelve', 10, 3);
+  eq(lines.length, 3);
+  assert(lines[2].endsWith('…'));
+});
+
+/* ---------- Store ---------- */
+test('Store', 'get/set/update/remove with JSON values', () => {
+  const s = createStore(memoryStorage());
+  eq(s.get('missing', 'fb'), 'fb');
+  s.set('a', { x: 1 }); eq(s.get('a'), { x: 1 });
+  s.update('n', (v) => v + 1, 0); s.update('n', (v) => v + 1, 0); eq(s.get('n'), 2);
+  s.remove('a'); eq(s.get('a'), null);
+});
+test('Store', 'emits change events', () => {
+  const s = createStore(memoryStorage());
+  const seen = [];
+  const off = s.on('k', (v) => seen.push(v));
+  s.on('*', (v, k) => seen.push(`*${k}`));
+  s.set('k', 1); off(); s.set('k', 2);
+  eq(seen, [1, '*k', '*k']);
+});
+test('Store', 'reports quota errors instead of throwing', () => {
+  const full = { ...memoryStorage(), getItem: () => null, setItem: () => { throw Object.assign(new Error('full'), { name: 'QuotaExceededError' }); } };
+  const s = createStore(full);
+  let err = null;
+  s.on('error', (e) => { err = e; });
+  eq(s.set('x', 1), false);
+  assert(err && err.quota, 'quota flag set');
+});
+test('Store', 'ignores corrupt JSON', () => {
+  const m = memoryStorage(); m.setItem('lumen:bad', '{not json');
+  eq(createStore(m).get('bad', 'fallback'), 'fallback');
+});
+test('Store', 'removeWhere clears by prefix', () => {
+  const s = createStore(memoryStorage());
+  s.set('data:u1:a', 1); s.set('data:u1:b', 2); s.set('data:u2:a', 3);
+  s.removeWhere('data:u1:');
+  eq([s.get('data:u1:a'), s.get('data:u1:b'), s.get('data:u2:a')], [null, null, 3]);
+});
+
+/* ---------- Search & sort ---------- */
+const sample = [
+  { id: 'a', title: 'Learn CSS Grid', description: 'layout tutorial', tags: ['css'], category: 'Coding', views: 10, createdAt: '2026-01-01', channelId: 'c1' },
+  { id: 'b', title: 'Grid Strategy Games', description: 'top picks', tags: ['games'], category: 'Gaming', views: 500, createdAt: '2026-03-01', channelId: 'c2' },
+  { id: 'c', title: 'Rocket science', description: 'css not included', tags: [], category: 'Science', views: 50, createdAt: '2026-02-01', channelId: 'c1', live: true },
+];
+test('Search', 'tokenize lowercases and strips accents', () => {
+  eq(tokenize('  Café, CSS-Grid! '), ['cafe', 'css', 'grid']);
+});
+test('Search', 'all tokens must match', () => {
+  eq(searchVideos(sample, 'css grid').map((v) => v.id), ['a']);
+});
+test('Search', 'relevance ranks title matches above description matches', () => {
+  eq(searchVideos(sample, 'css').map((v) => v.id), ['a', 'c']);
+});
+test('Search', 'sort by views and date', () => {
+  eq(searchVideos(sample, 'grid', { sort: 'views' }).map((v) => v.id), ['b', 'a']);
+  eq(sortVideos(sample, 'date').map((v) => v.id), ['b', 'c', 'a']);
+});
+test('Search', 'type filter live/video', () => {
+  eq(searchVideos(sample, '', { type: 'live' }).map((v) => v.id), ['c']);
+  eq(searchVideos(sample, '', { type: 'video' }).length, 2);
+});
+test('Search', 'matches channel names', () => {
+  eq(searchVideos(sample, 'acme', { channelName: (id) => (id === 'c2' ? 'Acme Plays' : '') }).map((v) => v.id), ['b']);
+});
+test('Search', 'searchChannels', () => {
+  eq(searchChannels([{ name: 'Byte Sized', handle: '@bytesized' }, { name: 'Orbit', handle: '@orbit' }], 'byte').length, 1);
+  eq(searchChannels([{ name: 'X', handle: '@x' }], '').length, 0);
+});
+
+/* ---------- Auth ---------- */
+test('Auth', 'hashPassword is deterministic per salt and differs across salts', async () => {
+  const a = await hashPassword('hunter22', 'salt1');
+  eq(a, await hashPassword('hunter22', 'salt1'));
+  assert(a !== await hashPassword('hunter22', 'salt2'), 'salt changes hash');
+  assert(/^[0-9a-f]{64}$/.test(a), 'hex sha-256');
+});
+test('Auth', 'hash equals SHA-256 of "salt:password"', async () => {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('s:p'));
+  const hex = Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, '0')).join('');
+  eq(await hashPassword('p', 's'), hex);
+});
+test('Auth', 'generateSalt is random hex', () => {
+  const a = generateSalt(), b = generateSalt();
+  assert(/^[0-9a-f]{32}$/.test(a) && a !== b);
+});
+test('Auth', 'validateSignup rules', () => {
+  eq(Object.keys(validateSignup({ username: 'ab', displayName: '', password: 'short', confirm: 'x' })).sort(), ['confirm', 'displayName', 'password', 'username']);
+  eq(validateSignup({ username: 'good_name', displayName: 'Good', password: 'longenough', confirm: 'longenough' }), {});
+});
+test('Auth', 'sign up never stores the plain password', async () => {
+  const storage = memoryStorage();
+  const auth = createAuth(createStore(storage));
+  await auth.signUp({ username: 'alice', displayName: 'Alice', password: 'correct horse', confirm: 'correct horse' });
+  const raw = storage.getItem('lumen:users');
+  assert(!raw.includes('correct horse'), 'plain text found in storage');
+  const rec = JSON.parse(raw).alice;
+  assert(rec.salt && rec.hash && rec.hash !== 'correct horse');
+  eq(auth.currentUser().username, 'alice');
+  assert(!('hash' in auth.currentUser()), 'hash not exposed to UI');
+});
+test('Auth', 'log in / log out / wrong password / duplicate user', async () => {
+  const auth = createAuth(createStore(memoryStorage()));
+  await auth.signUp({ username: 'bob', displayName: 'Bob', password: 'password1', confirm: 'password1' });
+  auth.logOut();
+  eq(auth.currentUser(), null);
+  await rejects(auth.logIn('bob', 'nope-nope'), /Incorrect/);
+  await rejects(auth.logIn('nobody', 'password1'), /Incorrect/);
+  await auth.logIn('BOB', 'password1');
+  eq(auth.currentUser().displayName, 'Bob');
+  await rejects(auth.signUp({ username: 'bob', displayName: 'B2', password: 'password2', confirm: 'password2' }), /taken/);
+});
+test('Auth', 'updateProfile validates input', async () => {
+  const auth = createAuth(createStore(memoryStorage()));
+  await auth.signUp({ username: 'cara', displayName: 'Cara', password: 'password1', confirm: 'password1' });
+  auth.updateProfile({ displayName: 'Cara D', bio: 'hi', initial: 'z', color: '#123abc' });
+  const u = auth.currentUser();
+  eq([u.displayName, u.bio, u.initial, u.color], ['Cara D', 'hi', 'Z', '#123abc']);
+  let threw = false;
+  try { auth.updateProfile({ color: 'red;background:url(x)' }); } catch { threw = true; }
+  assert(threw, 'invalid color rejected');
+});
+
+/* ---------- Router ---------- */
+test('Router', 'matchRoute extracts params', () => {
+  eq(matchRoute('/watch/:id', '/watch/abc%20d'), { id: 'abc d' });
+  eq(matchRoute('/watch/:id', '/watch'), null);
+  eq(matchRoute('/', '/'), {});
+  eq(matchRoute('/search', '/channel'), null);
+});
+test('Router', 'parseHash splits path and query', () => {
+  const { path, query } = parseHash('#/search?q=hello%20world&sort=date');
+  eq(path, '/search'); eq(query.get('q'), 'hello world'); eq(query.get('sort'), 'date');
+  eq(parseHash('').path, '/');
+});
+
+/* ---------- Upload validation ---------- */
+test('Upload', 'validateVideoFile', () => {
+  eq(validateVideoFile({ name: 'a.mp4', type: 'video/mp4', size: 1000 }), '');
+  eq(validateVideoFile({ name: 'a.webm', type: 'video/webm', size: MAX_BYTES }), '');
+  assert(validateVideoFile({ name: 'a.mov', type: 'video/quicktime', size: 10 }).includes('MP4'));
+  assert(validateVideoFile({ name: 'a.mp4', type: 'video/mp4', size: MAX_BYTES + 1 }).includes('500 MB'));
+  assert(validateVideoFile({ name: 'a.mp4', type: 'video/mp4', size: 0 }).includes('empty'));
+  assert(validateVideoFile(null).length > 0);
+});
+
+/* ---------- Seed data ---------- */
+test('Seed data', 'at least 24 videos across 8+ channels', () => {
+  assert(SEED_VIDEOS.length >= 24, `only ${SEED_VIDEOS.length} videos`);
+  assert(new Set(SEED_VIDEOS.map((v) => v.channelId)).size >= 8);
+  const ids = new Set(CHANNELS.map((c) => c.id));
+  assert(SEED_VIDEOS.every((v) => ids.has(v.channelId)), 'every video has a channel');
+  eq(new Set(SEED_VIDEOS.map((v) => v.id)).size, SEED_VIDEOS.length, 'unique ids');
+});
+test('Seed data', 'seed comments are deterministic', () => {
+  eq(seedComments('v-aurora'), seedComments('v-aurora'));
+  assert(seedComments('v-aurora').length >= 2);
+});
+
+/* ---------- Runner ---------- */
+(async () => {
+  const list = document.getElementById('results');
+  let pass = 0, fail = 0, lastGroup = '';
+  const failures = [];
+  for (const t of tests) {
+    if (t.group !== lastGroup) { list.append(h('li', { class: 'group' }, t.group)); lastGroup = t.group; }
+    try {
+      await t.fn();
+      pass++;
+      list.append(h('li', { class: 'pass' }, `✓ ${t.name}`));
+    } catch (e) {
+      fail++;
+      failures.push(`${t.group} › ${t.name}: ${e.message}`);
+      list.append(h('li', { class: 'fail' }, `✗ ${t.name}`, h('span', { class: 'err' }, e.message)));
+    }
+  }
+  const summary = document.getElementById('summary');
+  summary.textContent = `${pass} passed, ${fail} failed (${tests.length} total)`;
+  summary.className = fail ? 'fail' : 'pass';
+  document.title = `${fail ? '✗' : '✓'} Lumen tests`;
+  window.__TEST_RESULTS__ = { pass, fail, failures };
+})();

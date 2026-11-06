@@ -1,0 +1,14 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Local build output (the Pages workflow builds _site in CI)
+_site/
+
+# Logs and temp
+*.log
+tmp/

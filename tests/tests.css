@@ -1,0 +1,12 @@
+body { font-family: system-ui, sans-serif; margin: 0; background: #fff; color: #111; }
+main { max-width: 860px; margin: 0 auto; padding: 24px 16px; }
+#summary { font-weight: 700; font-size: 1.1rem; }
+#summary.pass { color: #15803d; }
+#summary.fail { color: #b91c1c; }
+#results { padding-left: 24px; }
+#results li { padding: 4px 0; }
+.pass::marker { color: #15803d; }
+.fail { color: #b91c1c; }
+.err { display: block; font-family: ui-monospace, monospace; font-size: .85rem; white-space: pre-wrap; }
+.group { font-weight: 700; list-style: none; margin: 16px 0 4px -24px; }
+code { background: #f2f2f3; padding: 1px 4px; border-radius: 4px; }
