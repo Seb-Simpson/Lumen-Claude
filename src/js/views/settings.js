@@ -6,6 +6,7 @@ import { SPEEDS } from '../components/player.js';
 import { toast, confirmDialog, pageTitle } from '../components/ui.js';
 import { renderHeader } from '../components/shell.js';
 import { db, ready } from '../db.js';
+import { REMOTE } from '../backend/remote.js';
 
 export async function render(ctx) {
   ctx.setMeta('Settings', 'Lumen preferences.');
@@ -31,7 +32,7 @@ export async function render(ctx) {
       h('div', { class: 'field' }, h('label', { for: 'set-speed' }, 'Default playback speed'), speed),
       h('label', { class: 'switch-row', for: 'set-autoplay' }, autoplay, h('span', {}, h('strong', {}, 'Autoplay'), h('span', { class: 'muted small' }, 'Play the next video automatically when one ends')))),
     h('section', { class: 'settings-section' }, h('h2', {}, 'Privacy & data'),
-      h('p', {}, 'Your history, likes and uploads are stored only in this browser.'),
+      h('p', {}, REMOTE ? 'Your watch history and these settings are stored only in this browser.' : 'Your history, likes and uploads are stored only in this browser.'),
       h('button', { class: 'btn btn-secondary', type: 'button', onClick: async () => {
         if (!(await confirmDialog({ title: 'Clear watch history?', message: 'This removes all videos from your history and resets saved playback positions.', confirmLabel: 'Clear history', danger: true }))) return;
         library.clearHistory();
@@ -44,7 +45,8 @@ export async function render(ctx) {
   if (!ctx.isActive()) return;
   const parts = [
     store.persistent ? 'Settings storage: available.' : 'Settings storage: blocked — changes last for this tab only.',
-    db.persistent ? 'Upload storage (IndexedDB): available.' : 'Upload storage (IndexedDB): unavailable.',
+    REMOTE ? 'Accounts, uploads and reactions: stored on the Lumen server (Supabase).'
+      : db.persistent ? 'Upload storage (IndexedDB): available.' : 'Upload storage (IndexedDB): unavailable.',
   ];
   if (est?.quota) parts.push(`Using ${(est.usage / 1048576).toFixed(1)} MB of about ${(est.quota / 1073741824).toFixed(1)} GB.`);
   storageInfo.textContent = parts.join(' ');

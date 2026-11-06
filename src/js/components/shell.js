@@ -10,6 +10,7 @@ import { getPublicVideos, getChannel } from '../videos.js';
 import { searchVideos } from '../search.js';
 import { navigate, currentPath, parseHash } from '../router.js';
 import { applyTheme } from '../theme.js';
+import { REMOTE } from '../backend/remote.js';
 
 const DESKTOP = window.matchMedia('(min-width: 1100px)');
 
@@ -176,8 +177,9 @@ export function renderFooter() {
       h('ul', { class: 'footer-links' },
         [['#/about', 'About'], ['#/privacy', 'Privacy'], ['#/terms', 'Terms'], ['#/help', 'Help']].map(([href, label]) => h('li', {}, h('a', { href }, label))),
         h('li', {}, h('button', { type: 'button', class: 'link-btn', onClick: openShortcuts }, 'Keyboard shortcuts')))),
-    h('p', { class: 'demo-note' }, icon('info', { size: 16 }),
-      ' Demo project: accounts, comments and uploads are stored only in this browser. Sign-in is not real security — don\'t reuse a real password.'),
+    h('p', { class: 'demo-note' }, icon('info', { size: 16 }), REMOTE
+      ? ' Lumen is a hobby project. Accounts, uploads and comments are stored with Supabase and are visible to other people. Your watch history and settings stay in this browser.'
+      : ' Demo project: accounts, comments and uploads are stored only in this browser. Sign-in is not real security — don\'t reuse a real password.'),
     h('p', { class: 'muted' }, `© ${new Date().getFullYear()} Lumen. MIT licensed.`));
 }
 

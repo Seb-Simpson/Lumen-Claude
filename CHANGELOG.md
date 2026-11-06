@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-06
+
+### Added
+- Database mode with Supabase. Real accounts (email and password), plus shared uploads, comments, replies, likes, subscriptions and playlists that work on any device. Built with a small fetch-based client, so there's still no npm.
+- `supabase/setup.sql` with tables, storage buckets and Row Level Security rules, a plain-language setup guide, and 62 tests of the rules.
+- A Report button on uploaded videos, a delete button for your own comments (and for comments on your videos), and upload progress for real network uploads.
+- Privacy, Terms, About and Help text for database mode.
+
+### Fixed
+- Uploaded videos no longer show made-up sample comments.
+- Reply threads start open only when they contain your own reply.
+
 ## [1.1.0] - 2026-11-06
 
 ### Added

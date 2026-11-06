@@ -5,6 +5,7 @@ import { avatar, emptyState, skeletonGrid } from '../components/ui.js';
 import { subscribeButton } from './watch.js';
 import { library } from '../library.js';
 import { auth } from '../auth.js';
+import * as remote from '../backend/remote.js';
 
 export async function render(ctx) {
   const channel = getChannel(ctx.params.id);
@@ -20,6 +21,9 @@ export async function render(ctx) {
   const subs = h('span', {});
   const paintSubs = () => { subs.textContent = `${formatCount(channel.subscribers + (library.isSubscribed(channel.id) ? 1 : 0))} subscribers`; };
   paintSubs();
+  if (remote.REMOTE) {
+    remote.subscribersFromOthers(channel.id).then((n) => { if (ctx.isActive()) { channel.subscribers += n; paintSubs(); } }).catch(() => {});
+  }
 
   const banner = h('div', { class: 'channel-banner' }, h('img', { src: channel.banner, alt: '', width: 1600, height: 260 }));
   const content = h('div', { class: 'channel-content', role: 'tabpanel', id: 'channel-panel', aria: { labelledby: `tab-${tab}` } });

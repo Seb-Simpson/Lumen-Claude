@@ -10,6 +10,8 @@ import { validateVideoFile, MAX_BYTES } from '../src/js/views/upload.js';
 import { thumbnailSVG, wrapTitle } from '../src/js/data/thumbs.js';
 import { SEED_VIDEOS, CHANNELS, seedComments, LIVE_NOTE } from '../src/js/data/seed.js';
 import { createLibrary, validatePlaylistName, MAX_PLAYLIST_NAME } from '../src/js/library.js';
+import { createClient, friendlyError, inList, encodePath } from '../src/js/backend/supabase.js';
+import { isUuid } from '../src/js/backend/remote.js';
 
 const tests = [];
 const test = (group, name, fn) => tests.push({ group, name, fn });
@@ -230,6 +232,7 @@ test('Seed data', 'at least 24 videos across 8+ channels', () => {
 test('Seed data', 'seed comments are deterministic', () => {
   eq(seedComments('v-aurora'), seedComments('v-aurora'));
   assert(seedComments('v-aurora').length >= 2);
+  eq(seedComments('123e4567-e89b-42d3-a456-426614174000'), [], 'uploads get no fake comments');
 });
 
 test('Seed data', 'every video has its own description; live ones are labelled', () => {
@@ -298,6 +301,103 @@ test('Playlists', 'are private to each user', () => {
   eq(lib.playlists(), []);
   switchUser('alice');
   eq(lib.playlists().length, 1);
+});
+
+/* ---------- Supabase client ---------- */
+/** Swap globalThis.fetch for a fake while fn runs; returns the recorded calls. */
+async function withFakeFetch(responder, fn) {
+  const real = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, opts = {}) => {
+    calls.push({ url, ...opts });
+    const { status = 200, body = [] } = await responder(url, opts, calls.length);
+    return new Response(typeof body === 'string' ? body : JSON.stringify(body), { status });
+  };
+  try { await fn(calls); } finally { globalThis.fetch = real; }
+  return calls;
+}
+test('Supabase', 'friendlyError maps common errors to plain English', () => {
+  assert(/already exists/.test(friendlyError(422, { code: 'user_already_exists', msg: 'User already registered' }).message));
+  assert(/Incorrect email or password/.test(friendlyError(400, { error_code: 'invalid_credentials' }).message));
+  assert(/username is taken/.test(friendlyError(500, { msg: 'Database error saving new user' }).message));
+  assert(/permission/.test(friendlyError(403, { message: 'new row violates row-level security policy' }).message));
+  assert(/internet connection/.test(friendlyError(0).message));
+  assert(/50 MB/.test(friendlyError(413, { message: 'Payload too large' }).message));
+});
+test('Supabase', 'inList quotes values; encodePath keeps folders', () => {
+  eq(inList(['a', 'b"c']), 'in.("a","b\\"c")');
+  eq(encodePath('user id/my file.mp4'), 'user%20id/my%20file.mp4');
+  assert(isUuid('123e4567-e89b-42d3-a456-426614174000') && !isUuid('v-aurora'));
+});
+test('Supabase', 'select sends apikey, and the user token only when signed in', async () => {
+  const st = createStore(memoryStorage());
+  const calls = await withFakeFetch(() => ({ body: [{ id: 1 }] }), async () => {
+    const c = createClient('https://x.supabase.co/', 'pub_key', { storage: st });
+    eq(await c.select('videos', 'select=id'), [{ id: 1 }]);
+    st.set('sbSession', { access_token: 'tok', refresh_token: 'r', expires_at: Date.now() / 1000 + 3600, user: { id: 'u1' } });
+    const c2 = createClient('https://x.supabase.co', 'pub_key', { storage: st });
+    await c2.select('videos');
+    eq(c2.userId, 'u1');
+  });
+  eq(calls[0].url, 'https://x.supabase.co/rest/v1/videos?select=id');
+  eq(calls[0].headers.apikey, 'pub_key');
+  assert(!calls[0].headers.Authorization, 'no token for guests');
+  eq(calls[1].headers.Authorization, 'Bearer tok');
+});
+test('Supabase', 'expired session is refreshed before the request', async () => {
+  const st = createStore(memoryStorage());
+  st.set('sbSession', { access_token: 'old', refresh_token: 'r1', expires_at: 1, user: { id: 'u1' } });
+  const calls = await withFakeFetch((url) => (url.includes('grant_type=refresh_token')
+    ? { body: { access_token: 'new', refresh_token: 'r2', expires_in: 3600, user: { id: 'u1' } } }
+    : { body: [] }), async () => {
+    const c = createClient('https://x.supabase.co', 'k', { storage: st });
+    await c.select('profiles');
+  });
+  assert(calls[0].url.endsWith('/auth/v1/token?grant_type=refresh_token'), 'refreshed first');
+  eq(calls[1].headers.Authorization, 'Bearer new');
+  eq(st.get('sbSession').refresh_token, 'r2');
+});
+test('Supabase', 'sign-in failure gives a friendly error and keeps you signed out', async () => {
+  const st = createStore(memoryStorage());
+  await withFakeFetch(() => ({ status: 400, body: { error_code: 'invalid_credentials', msg: 'Invalid login credentials' } }), async () => {
+    const c = createClient('https://x.supabase.co', 'k', { storage: st });
+    await rejects(c.auth.signIn({ email: 'a@b.co', password: 'nope' }), /Incorrect email or password/);
+    eq(c.userId, null);
+  });
+});
+test('Supabase', 'library mirrors changes to the server only when signed in', async () => {
+  const s = createStore(memoryStorage());
+  let who = 'guest';
+  const seen = [];
+  const hooks = {
+    rate: (id, v) => seen.push(['rate', id, v]),
+    subscribe: (id, on) => seen.push(['sub', id, on]),
+    playlistCreate: (p) => seen.push(['plc', p.name]),
+    playlistUpdate: (p) => seen.push(['plu', p.videoIds.length]),
+    playlistDelete: (id) => seen.push(['pld', typeof id]),
+    commentLike: () => Promise.reject(new Error('offline')),
+    onError: (err, name) => seen.push(['err', name, err.message]),
+  };
+  const lib = createLibrary(s, () => who, hooks);
+  lib.rate('v1', 1);
+  eq(seen, [], 'guests are not synced');
+  who = 'u1';
+  lib.rate('v1', 1); lib.rate('v1', 1); lib.toggleSubscribe('c1');
+  const pl = lib.createPlaylist('Mix'); lib.togglePlaylistVideo(pl.id, 'v1'); lib.deletePlaylist(pl.id);
+  lib.toggleCommentLike('x');
+  await new Promise((r) => setTimeout(r, 0));
+  eq(seen, [['rate', 'v1', 1], ['rate', 'v1', 0], ['sub', 'c1', true], ['plc', 'Mix'], ['plu', 1], ['pld', 'string'], ['err', 'commentLike', 'offline']]);
+  assert(isUuid(pl.id), 'playlist ids are UUIDs so the server accepts them');
+});
+test('Supabase', 'hydrate replaces the signed-in user\'s data', () => {
+  const lib = createLibrary(createStore(memoryStorage()), () => 'u1');
+  lib.hydrate({ ratings: { v1: 1, v2: -1 }, subs: ['c1'], commentLikes: { k: true }, playlists: [{ id: 'p', name: 'P', videoIds: ['v1'], createdAt: 1, updatedAt: 1 }] });
+  eq([lib.rating('v1'), lib.rating('v2'), lib.likedIds(), lib.subscriptions(), lib.commentLiked('k'), lib.playlists().length], [1, -1, ['v1'], ['c1'], true, 1]);
+});
+test('Upload', 'Supabase mode uses a 50 MB limit', () => {
+  const f = { name: 'a.mp4', type: 'video/mp4', size: 60 * 1024 * 1024 };
+  eq(validateVideoFile(f), '');
+  assert(validateVideoFile(f, 50 * 1024 * 1024).includes('50 MB'));
 });
 
 /* ---------- Runner ---------- */

@@ -9,19 +9,24 @@ import { CATEGORIES } from '../data/seed.js';
 import { toast, emptyState, pageTitle } from '../components/ui.js';
 import { icon } from '../components/icons.js';
 import { navigate } from '../router.js';
+import * as remote from '../backend/remote.js';
+import { REMOTE_MAX_UPLOAD } from '../config.js';
 
 export const MAX_BYTES = 500 * 1024 * 1024;
+/** Upload limit for the current mode: 50 MB with Supabase's free plan, 500 MB in the browser. */
+export const maxUploadBytes = () => (remote.REMOTE ? REMOTE_MAX_UPLOAD : MAX_BYTES);
+const formatLimit = (bytes) => `${Math.round(bytes / 1048576)} MB`;
 export const VIDEO_TYPES = ['video/mp4', 'video/webm'];
 export const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 const MAX_THUMB = 5 * 1024 * 1024;
 
 /** Validate a video file. Returns an error message or ''. Exported for tests. */
-export function validateVideoFile(file) {
+export function validateVideoFile(file, maxBytes = MAX_BYTES) {
   if (!file) return 'Choose a video file.';
   const ext = (file.name || '').toLowerCase().split('.').pop();
   const typeOk = VIDEO_TYPES.includes(file.type) || (!file.type && ['mp4', 'webm'].includes(ext));
   if (!typeOk) return 'Only MP4 and WebM videos are supported.';
-  if (file.size > MAX_BYTES) return 'That file is larger than 500 MB.';
+  if (file.size > maxBytes) return `That file is larger than ${formatLimit(maxBytes)}.`;
   if (file.size === 0) return 'That file is empty.';
   return '';
 }
@@ -72,7 +77,7 @@ export async function render(ctx) {
   const drop = h('div', { class: 'dropzone' },
     icon('upload', { size: 48 }),
     h('p', { class: 'drop-title' }, 'Drag and drop a video file here'),
-    h('p', { class: 'muted' }, 'MP4 or WebM, up to 500 MB'),
+    h('p', { class: 'muted' }, `MP4 or WebM, up to ${formatLimit(maxUploadBytes())}`),
     h('label', { class: 'btn btn-primary', for: 'video-file' }, 'Select file'),
     fileInput, fileInfo);
 
@@ -90,7 +95,7 @@ export async function render(ctx) {
   const submit = h('button', { class: 'btn btn-primary', type: 'submit' }, 'Upload');
 
   const setFile = (file) => {
-    const err = validateVideoFile(file);
+    const err = validateVideoFile(file, maxUploadBytes());
     fileError.textContent = err;
     if (err) { videoFile = null; fileInfo.textContent = ''; toast(err, { type: 'error' }); return; }
     videoFile = file;
@@ -118,11 +123,33 @@ export async function render(ctx) {
 
   const form = h('form', { class: 'upload-form', novalidate: true, onSubmit: async (e) => {
     e.preventDefault();
-    const err = validateVideoFile(videoFile);
+    const err = validateVideoFile(videoFile, maxUploadBytes());
     if (err) { fileError.textContent = err; drop.querySelector('label').focus(); return; }
     if (!title.value.trim()) { toast('Add a title for your video.', { type: 'error' }); title.focus(); return; }
     submit.disabled = true;
     progress.hidden = false;
+    const visibilityValue = form.querySelector('input[name="visibility"]:checked').value;
+    if (remote.REMOTE) {
+      try {
+        progressText.textContent = 'Preparing…';
+        const duration = await probeDuration(videoFile);
+        const id = await remote.uploadVideo({
+          file: videoFile, thumbFile, duration,
+          title: title.value.trim(), description: description.value.trim(), category: category.value, visibility: visibilityValue,
+        }, (p) => { const pct = Math.min(99, Math.round(p * 100)); progress.value = pct; progressText.textContent = `Uploading… ${pct}%`; });
+        progress.value = 100;
+        progressText.textContent = 'Upload complete';
+        toast('Video uploaded!', { type: 'success' });
+        navigate(`/watch/${encodeURIComponent(id)}`);
+      } catch (error) {
+        console.error(error);
+        toast(`Upload failed: ${error.message || 'unknown error'}`, { type: 'error', timeout: 8000 });
+        submit.disabled = false;
+        progress.hidden = true;
+        progressText.textContent = '';
+      }
+      return;
+    }
     try {
       const buf = await readWithProgress(videoFile, (p) => { progress.value = Math.round(p * 90); progressText.textContent = `Uploading… ${Math.round(p * 90)}%`; });
       progressText.textContent = 'Processing…';
@@ -131,7 +158,7 @@ export async function render(ctx) {
       await saveUpload({
         id, ownerId: me.id, channelId: me.id,
         title: title.value.trim(), description: description.value.trim(), category: category.value,
-        visibility: form.querySelector('input[name="visibility"]:checked').value,
+        visibility: visibilityValue,
         videoBlob: new Blob([buf], { type: videoFile.type || 'video/mp4' }),
         thumbBlob: thumbFile || null, size: videoFile.size, duration, createdAt: new Date().toISOString(),
       });
@@ -159,5 +186,5 @@ export async function render(ctx) {
   h('div', { class: 'form-actions' }, h('a', { class: 'btn btn-ghost', href: '#/studio' }, 'Cancel'), submit));
 
   mount(ctx.outlet, h('div', { class: 'page narrow' }, pageTitle('Upload video'), form));
-  ready().then((ok) => { if (!ok && ctx.isActive()) toast('Browser storage is unavailable, so uploads will disappear when you close this tab.', { type: 'error', timeout: 8000 }); });
+  if (!remote.REMOTE) ready().then((ok) => { if (!ok && ctx.isActive()) toast('Browser storage is unavailable, so uploads will disappear when you close this tab.', { type: 'error', timeout: 8000 }); });
 }

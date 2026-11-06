@@ -1,4 +1,6 @@
-// Comments: seed comments + comments stored locally. Replies are one level deep.
+// Comments: built-in sample comments plus people's comments, stored in
+// Supabase when it's configured or in this browser otherwise.
+// Replies are one level deep.
 
 import { h, timeAgo, formatCount, uid } from '../utils.js';
 import { store } from '../store.js';
@@ -7,19 +9,23 @@ import { library } from '../library.js';
 import { seedComments } from '../data/seed.js';
 import { avatar, toast } from './ui.js';
 import { icon } from './icons.js';
+import * as remote from '../backend/remote.js';
+import { confirmDialog } from './ui.js';
 
 const MAX_LEN = 1000;
 const userKey = (videoId) => `comments:${videoId}`;
 
-/** All comments for a video, newest local ones first, then seed comments. */
-export function getComments(videoId) {
+/** All comments for a video: people's comments (newest first), then the samples. */
+export async function getComments(videoId) {
+  if (remote.REMOTE) return [...await remote.fetchComments(videoId), ...seedComments(videoId)];
   const local = store.get(userKey(videoId), { top: [], replies: {} });
   const seeds = seedComments(videoId);
   const all = [...local.top, ...seeds];
   return all.map((c) => ({ ...c, replies: [...(c.replies || []), ...(local.replies[c.id] || [])] }));
 }
 
-function addComment(videoId, text, parentId = null) {
+async function addComment(videoId, text, parentId = null) {
+  if (remote.REMOTE) return remote.addComment(videoId, text, parentId);
   const me = auth.currentUser();
   const comment = {
     id: uid('c'), author: me.displayName, color: me.color, initial: me.initial, userId: me.id,
@@ -48,15 +54,18 @@ function composer({ placeholder, submitLabel, onSubmit, onCancel, autofocus = fa
     ta.style.height = 'auto';
     ta.style.height = `${ta.scrollHeight}px`;
   });
-  const form = h('form', { class: 'composer', onSubmit: (e) => {
+  const form = h('form', { class: 'composer', onSubmit: async (e) => {
     e.preventDefault();
     const text = ta.value.trim();
-    if (!text) return;
+    if (!text || submit.disabled) return;
+    submit.disabled = true;
     try {
-      onSubmit(text);
+      await onSubmit(text);
       ta.value = '';
-      submit.disabled = true;
-    } catch (err) { toast(err.message, { type: 'error' }); }
+    } catch (err) {
+      toast(err.message, { type: 'error' });
+      submit.disabled = false;
+    }
   } },
   avatar({ initial: me.initial, color: me.color, size: 36 }),
   h('div', { class: 'composer-main' }, ta, actions));
@@ -64,7 +73,11 @@ function composer({ placeholder, submitLabel, onSubmit, onCancel, autofocus = fa
   return form;
 }
 
-function commentItem(videoId, c, { isReply = false, rerender }) {
+function commentItem(videoId, c, { isReply = false, rerender, videoOwnerId }) {
+  const me = auth.currentUser();
+  // Sample comments can't be replied to on the server (they aren't stored there).
+  const canReply = !isReply && (!remote.REMOTE || remote.isUuid(c.id));
+  const canDelete = remote.REMOTE && me && remote.isUuid(c.id) && (c.userId === me.id || videoOwnerId === me.id);
   const liked = library.commentLiked(c.id);
   const likeBtn = h('button', {
     class: `chip-btn ${liked ? 'active' : ''}`, type: 'button', aria: { pressed: String(liked), label: `Like comment by ${c.author}` },
@@ -78,20 +91,25 @@ function commentItem(videoId, c, { isReply = false, rerender }) {
   const count = h('span', { class: 'like-count' }, formatCount(c.likes + (liked ? 1 : 0)));
   const replySlot = h('div', { class: 'reply-slot' });
 
-  const replyBtn = isReply ? null : h('button', { class: 'btn btn-ghost btn-sm', type: 'button', onClick: () => {
+  const deleteBtn = canDelete ? h('button', { class: 'btn btn-ghost btn-sm', type: 'button', onClick: async () => {
+    if (!(await confirmDialog({ title: 'Delete comment?', message: 'This comment and its replies will be removed for everyone.', confirmLabel: 'Delete', danger: true }))) return;
+    try { await remote.deleteComment(c.id); toast('Comment deleted'); rerender(); } catch (err) { toast(err.message, { type: 'error' }); }
+  } }, 'Delete') : null;
+
+  const replyBtn = !canReply ? null : h('button', { class: 'btn btn-ghost btn-sm', type: 'button', onClick: () => {
     if (!auth.currentUser()) { toast('Sign in to reply.'); location.hash = '#/login'; return; }
     if (replySlot.firstChild) { replySlot.replaceChildren(); return; }
     replySlot.append(composer({
       placeholder: `Reply to ${c.author}…`, submitLabel: 'Reply', autofocus: true,
       onCancel: () => replySlot.replaceChildren(),
-      onSubmit: (text) => { addComment(videoId, text, c.id); rerender(); toast('Reply posted'); },
+      onSubmit: async (text) => { await addComment(videoId, text, c.id); rerender(); toast('Reply posted'); },
     }));
   } }, 'Reply');
 
   const replies = !isReply && c.replies?.length
-    ? h('details', { class: 'replies', open: c.replies.some((r) => r.userId) },
+    ? h('details', { class: 'replies', open: !!me && c.replies.some((r) => r.userId === me.id) },
       h('summary', {}, `${c.replies.length} ${c.replies.length === 1 ? 'reply' : 'replies'}`),
-      h('ul', { class: 'comment-list' }, c.replies.map((r) => commentItem(videoId, r, { isReply: true, rerender }))))
+      h('ul', { class: 'comment-list' }, c.replies.map((r) => commentItem(videoId, r, { isReply: true, rerender, videoOwnerId }))))
     : null;
 
   return h('li', { class: `comment ${isReply ? 'is-reply' : ''}` },
@@ -99,23 +117,34 @@ function commentItem(videoId, c, { isReply = false, rerender }) {
     h('div', { class: 'comment-main' },
       h('p', { class: 'comment-head' }, h('strong', {}, c.author), ' ', h('span', { class: 'muted' }, timeAgo(c.createdAt))),
       h('p', { class: 'comment-text' }, c.text),
-      h('div', { class: 'comment-actions' }, likeBtn, count, replyBtn),
+      h('div', { class: 'comment-actions' }, likeBtn, count, replyBtn, deleteBtn),
       replySlot,
       replies));
 }
 
-export function commentsSection(videoId) {
-  const section = h('section', { class: 'comments', aria: { labelledby: 'comments-title' } });
-  const render = () => {
-    const list = getComments(videoId);
+export function commentsSection(videoId, { videoOwnerId = null } = {}) {
+  const section = h('section', { class: 'comments', aria: { labelledby: 'comments-title' } },
+    h('h2', { id: 'comments-title' }, 'Comments'), h('p', { class: 'muted' }, 'Loading comments…'));
+  const render = async () => {
+    let list;
+    try {
+      list = await getComments(videoId);
+    } catch (err) {
+      section.replaceChildren(h('h2', { id: 'comments-title' }, 'Comments'),
+        h('p', { class: 'muted' }, `Comments couldn't be loaded. ${err.message}`),
+        h('button', { class: 'btn btn-secondary btn-sm', type: 'button', onClick: render }, 'Try again'));
+      return;
+    }
+    if (!section.isConnected && section.dataset.mounted) return;
+    section.dataset.mounted = '1';
     const count = list.reduce((n, c) => n + 1 + (c.replies?.length || 0), 0);
     const me = auth.currentUser();
     section.replaceChildren(
       h('h2', { id: 'comments-title' }, `${count} Comments`),
       me
-        ? composer({ placeholder: 'Add a comment…', submitLabel: 'Comment', onSubmit: (text) => { addComment(videoId, text); render(); toast('Comment posted'); } })
+        ? composer({ placeholder: 'Add a comment…', submitLabel: 'Comment', onSubmit: async (text) => { await addComment(videoId, text); await render(); toast('Comment posted'); } })
         : h('p', { class: 'signin-prompt' }, h('a', { href: '#/login' }, 'Sign in'), ' to join the conversation.'),
-      h('ul', { class: 'comment-list' }, list.map((c) => commentItem(videoId, c, { rerender: render }))));
+      h('ul', { class: 'comment-list' }, list.map((c) => commentItem(videoId, c, { rerender: render, videoOwnerId }))));
   };
   render();
   return section;

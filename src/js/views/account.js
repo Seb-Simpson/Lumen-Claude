@@ -4,6 +4,7 @@ import { h, mount } from '../utils.js';
 import { auth, AVATAR_COLORS, MIN_PASSWORD } from '../auth.js';
 import { toast, avatar, pageTitle, emptyState } from '../components/ui.js';
 import { navigate } from '../router.js';
+import { REMOTE } from '../backend/remote.js';
 
 function field({ id, label, type = 'text', autocomplete, hint, ...rest }) {
   const err = h('p', { class: 'field-error', id: `${id}-err` });
@@ -18,12 +19,16 @@ function field({ id, label, type = 'text', autocomplete, hint, ...rest }) {
 /** Only allow internal redirects like "/upload". */
 const safeNext = (next) => (next && /^\/[a-z0-9/_-]*$/i.test(next) ? next : '/');
 
-const demoNotice = () => h('p', { class: 'notice' }, 'Demo only: accounts are stored in this browser. Passwords are salted and hashed, but please don\'t reuse a real password.');
+const demoNotice = () => h('p', { class: 'notice' }, REMOTE
+  ? 'Accounts are handled securely by Supabase. Lumen is a hobby project, so choose a password you don\'t use anywhere else.'
+  : 'Demo only: accounts are stored in this browser. Passwords are salted and hashed, but please don\'t reuse a real password.');
 
 export function renderLogin(ctx) {
   ctx.setMeta('Sign in', 'Sign in to Lumen.');
   if (auth.currentUser()) { navigate(safeNext(ctx.query.get('next')), { replace: true }); return; }
-  const user = field({ id: 'login-user', label: 'Username', autocomplete: 'username', required: true, autocapitalize: 'none', spellcheck: false });
+  const user = REMOTE
+    ? field({ id: 'login-user', label: 'Email', type: 'email', autocomplete: 'email', required: true, autocapitalize: 'none', spellcheck: false })
+    : field({ id: 'login-user', label: 'Username', autocomplete: 'username', required: true, autocapitalize: 'none', spellcheck: false });
   const pass = field({ id: 'login-pass', label: 'Password', type: 'password', autocomplete: 'current-password', required: true });
   const formErr = h('p', { class: 'field-error', role: 'alert' });
   const submit = h('button', { class: 'btn btn-primary btn-block', type: 'submit' }, 'Sign in');
@@ -33,7 +38,7 @@ export function renderLogin(ctx) {
     submit.disabled = true;
     try {
       const u = await auth.logIn(user.input.value, pass.input.value);
-      toast(`Welcome back, ${u.displayName}!`, { type: 'success' });
+      toast(`Welcome back${u?.displayName ? `, ${u.displayName}` : ''}!`, { type: 'success' });
       navigate(safeNext(ctx.query.get('next')));
     } catch (err) {
       formErr.textContent = err.message;
@@ -51,20 +56,21 @@ export function renderLogin(ctx) {
 export function renderSignup(ctx) {
   ctx.setMeta('Create account', 'Create a Lumen account.');
   if (auth.currentUser()) { navigate('/', { replace: true }); return; }
+  const email = REMOTE ? field({ id: 'su-email', label: 'Email', type: 'email', autocomplete: 'email', required: true, autocapitalize: 'none', spellcheck: false, hint: 'Used to sign in. It isn\'t shown to anyone.' }) : null;
   const display = field({ id: 'su-name', label: 'Display name', autocomplete: 'nickname', maxlength: 40, required: true });
   const user = field({ id: 'su-user', label: 'Username', autocomplete: 'username', hint: '3–20 lowercase letters, numbers or underscores.', required: true, autocapitalize: 'none', spellcheck: false });
   const pass = field({ id: 'su-pass', label: 'Password', type: 'password', autocomplete: 'new-password', hint: `At least ${MIN_PASSWORD} characters.`, required: true });
   const confirm = field({ id: 'su-confirm', label: 'Confirm password', type: 'password', autocomplete: 'new-password', required: true });
   const formErr = h('p', { class: 'field-error', role: 'alert' });
   const submit = h('button', { class: 'btn btn-primary btn-block', type: 'submit' }, 'Create account');
-  const map = { displayName: display, username: user, password: pass, confirm };
+  const map = { email, displayName: display, username: user, password: pass, confirm };
   const form = h('form', { class: 'auth-form', novalidate: true, onSubmit: async (e) => {
     e.preventDefault();
-    Object.values(map).forEach((f) => f.setError(''));
+    Object.values(map).forEach((f) => f?.setError(''));
     formErr.textContent = '';
     submit.disabled = true;
     try {
-      const u = await auth.signUp({ displayName: display.input.value, username: user.input.value, password: pass.input.value, confirm: confirm.input.value });
+      const u = await auth.signUp({ email: email?.input.value, displayName: display.input.value, username: user.input.value, password: pass.input.value, confirm: confirm.input.value });
       toast(`Welcome to Lumen, ${u.displayName}!`, { type: 'success' });
       navigate(safeNext(ctx.query.get('next')));
     } catch (err) {
@@ -74,7 +80,7 @@ export function renderSignup(ctx) {
         map[Object.keys(err.fields)[0]]?.input.focus();
       }
     } finally { submit.disabled = false; }
-  } }, display.el, user.el, pass.el, confirm.el, formErr, submit);
+  } }, email?.el, display.el, user.el, pass.el, confirm.el, formErr, submit);
   mount(ctx.outlet, h('div', { class: 'page auth-page' }, h('div', { class: 'auth-card' },
     pageTitle('Create your account'), form,
     h('p', {}, 'Already have an account? ', h('a', { href: '#/login' }, 'Sign in')),
@@ -108,10 +114,10 @@ export function renderProfile(ctx) {
   initial.input.addEventListener('input', paint);
   paint();
 
-  const form = h('form', { class: 'stack profile-form', novalidate: true, onSubmit: (e) => {
+  const form = h('form', { class: 'stack profile-form', novalidate: true, onSubmit: async (e) => {
     e.preventDefault();
     try {
-      auth.updateProfile({ displayName: name.input.value, initial: initial.input.value, bio: bio.value, color });
+      await auth.updateProfile({ displayName: name.input.value, initial: initial.input.value, bio: bio.value, color });
       toast('Profile saved', { type: 'success' });
     } catch (err) { toast(err.message, { type: 'error' }); }
   } },

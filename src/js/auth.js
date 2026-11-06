@@ -5,6 +5,7 @@
 // must authenticate on a server (see README "Adding a real backend").
 
 import { store as defaultStore } from './store.js';
+import * as remote from './backend/remote.js';
 
 export const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
 export const MIN_PASSWORD = 8;
@@ -128,4 +129,75 @@ export function createAuth(store) {
   return auth;
 }
 
-export const auth = createAuth(defaultStore);
+export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * Real accounts backed by Supabase Auth (used when config.js is filled in).
+ * Same interface as createAuth(), except sign-in uses an email address and
+ * signUp/logIn/updateProfile talk to the server.
+ */
+export function createRemoteAuth(store, r = remote) {
+  const auth = {
+    remote: true,
+    currentUser() {
+      const id = r.sb.userId;
+      if (!id) return null;
+      return r.profileById(id) || store.get('sbProfile') || null;
+    },
+    currentUserId: () => r.sb.userId || 'guest',
+    getUser: (username) => r.profileByUsername(username),
+    allUsers: () => r.allProfiles(),
+    async signUp({ email, username, displayName, password, confirm }) {
+      const errors = validateSignup({ username, displayName, password, confirm });
+      if (!EMAIL_RE.test(String(email || '').trim())) errors.email = 'Enter a valid email address.';
+      if (Object.keys(errors).length) throw Object.assign(new Error('Please fix the highlighted fields.'), { fields: errors });
+      const name = username.trim().toLowerCase();
+      if (await r.usernameTaken(name)) throw Object.assign(new Error('That username is taken.'), { fields: { username: 'That username is taken.' } });
+      const user = await r.sb.auth.signUp({
+        email: email.trim(), password,
+        data: { username: name, display_name: displayName.trim(), color: AVATAR_COLORS[name.length % AVATAR_COLORS.length] },
+      });
+      const profile = await r.loadProfile(user.id);
+      if (profile) store.set('sbProfile', r.toUser(profile));
+      store.set('session', { remote: true, id: user.id });
+      return r.toUser(profile) || { id: user.id, username: name, displayName: displayName.trim() };
+    },
+    async logIn(email, password) {
+      const user = await r.sb.auth.signIn({ email: String(email || '').trim(), password: String(password || '') });
+      const profile = await r.loadProfile(user.id);
+      if (profile) store.set('sbProfile', r.toUser(profile));
+      store.set('session', { remote: true, id: user.id });
+      return r.toUser(profile);
+    },
+    logOut() {
+      store.remove('sbProfile');
+      return r.sb.auth.signOut();
+    },
+    async updateProfile(patch) {
+      if (!r.sb.userId) throw new Error('You need to be signed in.');
+      const row = {};
+      if (patch.displayName !== undefined) {
+        const d = String(patch.displayName).trim();
+        if (!d || d.length > 40) throw new Error('Display name must be 1–40 characters.');
+        row.display_name = d;
+      }
+      if (patch.bio !== undefined) row.bio = String(patch.bio).slice(0, 500);
+      if (patch.initial !== undefined) {
+        const i = String(patch.initial).trim();
+        if (!i) throw new Error('Avatar initial cannot be empty.');
+        row.initial = Array.from(i)[0].toUpperCase();
+      }
+      if (patch.color !== undefined) {
+        if (!/^#[0-9a-f]{6}$/i.test(patch.color)) throw new Error('Pick a valid color.');
+        row.color = patch.color;
+      }
+      const user = await r.updateMyProfile(row);
+      store.set('sbProfile', user);
+      store.set('session', store.get('session')); // notify listeners
+      return user;
+    },
+  };
+  return auth;
+}
+
+export const auth = remote.REMOTE ? createRemoteAuth(defaultStore) : createAuth(defaultStore);

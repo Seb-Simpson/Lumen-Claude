@@ -4,6 +4,7 @@
 import { store } from './store.js';
 import { auth } from './auth.js';
 import { uid } from './utils.js';
+import * as remote from './backend/remote.js';
 
 const MAX_HISTORY = 200;
 export const MAX_PLAYLISTS = 100;
@@ -20,9 +21,20 @@ export function validatePlaylistName(raw) {
 /**
  * Per-user library on top of a store. `userId` is a function so the bucket
  * follows whoever is signed in. Tests pass an in-memory store.
+ *
+ * `hooks` (optional) mirrors changes to a server. Each hook may return a
+ * promise; failures go to hooks.onError so the UI can resync. Hooks are only
+ * called for signed-in users, never for guests.
  */
-export function createLibrary(store, userId) {
+export function createLibrary(store, userId, hooks = null) {
   const key = (name) => `data:${userId()}:${name}`;
+  const sync = (name, ...args) => {
+    if (!hooks?.[name] || userId() === 'guest') return;
+    try {
+      Promise.resolve(hooks[name](...args)).catch((err) => hooks.onError?.(err, name));
+    } catch (err) { hooks.onError?.(err, name); }
+  };
+  const newPlaylistId = () => (globalThis.crypto?.randomUUID ? crypto.randomUUID() : uid('pl-'));
 
   const library = {
     // History: newest first, unique by video id.
@@ -42,7 +54,9 @@ export function createLibrary(store, userId) {
         if (next[videoId] === value) delete next[videoId]; else next[videoId] = value;
         return next;
       }, {});
-      return library.rating(videoId);
+      const now = library.rating(videoId);
+      sync('rate', videoId, now);
+      return now;
     },
     likedIds: () => Object.entries(store.get(key('ratings'), {})).filter(([, v]) => v === 1).map(([id]) => id),
 
@@ -61,6 +75,7 @@ export function createLibrary(store, userId) {
     toggleSubscribe(channelId) {
       const has = library.isSubscribed(channelId);
       store.update(key('subs'), (l) => (has ? l.filter((x) => x !== channelId) : [...l, channelId]), []);
+      sync('subscribe', channelId, !has);
       return !has;
     },
 
@@ -75,6 +90,7 @@ export function createLibrary(store, userId) {
     toggleCommentLike(id) {
       const liked = library.commentLiked(id);
       store.update(key('commentLikes'), (m) => { const n = { ...m }; if (liked) delete n[id]; else n[id] = true; return n; }, {});
+      sync('commentLike', id, !liked);
       return !liked;
     },
 
@@ -87,8 +103,9 @@ export function createLibrary(store, userId) {
       if (error) throw new Error(error);
       if (library.playlists().length >= MAX_PLAYLISTS) throw new Error(`You can have up to ${MAX_PLAYLISTS} playlists.`);
       const now = Date.now();
-      const pl = { id: uid('pl-'), name, videoIds: firstVideoId ? [firstVideoId] : [], createdAt: now, updatedAt: now };
+      const pl = { id: newPlaylistId(), name, videoIds: firstVideoId ? [firstVideoId] : [], createdAt: now, updatedAt: now };
       if (!store.update(key('playlists'), (l) => [pl, ...l], [])) throw new Error('Could not save the playlist (storage is full or blocked).');
+      sync('playlistCreate', pl);
       return pl;
     },
     /** Apply fn to one playlist's fields. Throws if it doesn't exist. */
@@ -97,14 +114,19 @@ export function createLibrary(store, userId) {
       if (!store.update(key('playlists'), (l) => l.map((p) => (p.id === id ? { ...p, ...fn(p), updatedAt: Date.now() } : p)), [])) {
         throw new Error('Could not save the playlist (storage is full or blocked).');
       }
-      return library.getPlaylist(id);
+      const updated = library.getPlaylist(id);
+      sync('playlistUpdate', updated);
+      return updated;
     },
     renamePlaylist(id, rawName) {
       const { name, error } = validatePlaylistName(rawName);
       if (error) throw new Error(error);
       return library._edit(id, () => ({ name }));
     },
-    deletePlaylist(id) { store.update(key('playlists'), (l) => l.filter((p) => p.id !== id), []); },
+    deletePlaylist(id) {
+      store.update(key('playlists'), (l) => l.filter((p) => p.id !== id), []);
+      sync('playlistDelete', id);
+    },
     /** Add or remove a video. Returns true if the video is now in the playlist. */
     togglePlaylistVideo(id, videoId) {
       const has = library.getPlaylist(id)?.videoIds.includes(videoId);
@@ -129,11 +151,25 @@ export function createLibrary(store, userId) {
       const i = ids.indexOf(videoId);
       return i >= 0 && i < ids.length - 1 ? ids[i + 1] : null;
     },
+
+    /** Replace server-backed data with a fresh copy (after sign-in or a sync error). */
+    hydrate({ ratings, subs, commentLikes, playlists }) {
+      if (ratings) store.set(key('ratings'), ratings);
+      if (subs) store.set(key('subs'), subs);
+      if (commentLikes) store.set(key('commentLikes'), commentLikes);
+      if (playlists) store.set(key('playlists'), playlists);
+    },
   };
   return library;
 }
 
-export const library = createLibrary(store, () => auth.currentUserId());
+export const library = createLibrary(store, () => auth.currentUserId(), remote.REMOTE ? {
+  ...remote.syncHooks,
+  onError: (err) => {
+    console.error(err);
+    document.dispatchEvent(new CustomEvent('lumen:sync-error', { detail: err }));
+  },
+} : null);
 
 // Views are shared across users in this browser.
 export const localViews = (videoId) => store.get('views', {})[videoId] || 0;

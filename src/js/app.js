@@ -16,6 +16,8 @@ import { renderLogin, renderSignup, renderProfile } from './views/account.js';
 import { renderLibrary, renderHistory, renderLiked, renderWatchLater, renderSubscriptions } from './views/library.js';
 import { renderPage, renderNotFound } from './views/pages.js';
 import { renderPlaylists, renderPlaylist } from './views/playlists.js';
+import * as remote from './backend/remote.js';
+import { library } from './library.js';
 
 applyTheme();
 watchSystemTheme(renderHeader);
@@ -73,4 +75,50 @@ window.addEventListener('unhandledrejection', (e) => {
   toast('Something went wrong. Please try again.', { type: 'error' });
 });
 
-start(document.getElementById('main'));
+/* ---------- Supabase mode: load shared data before the first page ---------- */
+
+/** Pull the signed-in user's likes, subscriptions and playlists from the server. */
+async function hydrateFromServer() {
+  if (!remote.sb.userId) return;
+  library.hydrate(await remote.fetchMine());
+}
+
+async function initRemote() {
+  try {
+    await remote.sb.auth.ensureFresh();
+  } catch (err) {
+    if (err.status >= 400 && err.status < 500) toast('Your session expired. Please sign in again.');
+  }
+  try {
+    await remote.loadProfiles();
+    await hydrateFromServer();
+  } catch (err) {
+    console.error(err);
+    toast(`Couldn't reach the Lumen server, so some things may be missing. ${err.message}`, { type: 'error', timeout: 8000 });
+  }
+  // Re-sync after signing in, and after any failed save so the screen matches the server.
+  let lastUser = remote.sb.userId;
+  store.on('session', async () => {
+    const id = remote.sb.userId;
+    if (id && id !== lastUser) {
+      await remote.loadProfiles().catch(() => {});
+      await hydrateFromServer().catch((e) => console.error(e));
+      renderSidebar();
+    }
+    lastUser = id;
+  });
+  document.addEventListener('lumen:sync-error', async (e) => {
+    toast(`Couldn't save that change. ${e.detail?.message || ''}`.trim(), { type: 'error', timeout: 6000 });
+    await hydrateFromServer().catch(() => {});
+    renderSidebar();
+  });
+  document.addEventListener('lumen:offline', (e) => {
+    toast(`Couldn't load videos from the server. ${e.detail?.message || ''}`.trim(), { type: 'error', timeout: 8000 });
+  });
+}
+
+(remote.REMOTE ? initRemote() : Promise.resolve()).finally(() => {
+  renderHeader();
+  renderSidebar();
+  start(document.getElementById('main'));
+});

@@ -146,10 +146,11 @@ const REPLIES = ['Totally agree!', 'Same here 😄', 'Great point.', 'This needs
 
 /** Deterministic seed comments for a video. */
 export function seedComments(videoId) {
+  const video = SEED_VIDEOS.find((v) => v.id === videoId);
+  if (!video) return []; // uploads only get real comments
   const rnd = seededRandom(`c-${videoId}`);
   const n = 2 + Math.floor(rnd() * 4);
-  const video = SEED_VIDEOS.find((v) => v.id === videoId);
-  const base = video ? Date.parse(video.createdAt) : NOW;
+  const base = Date.parse(video.createdAt);
   return Array.from({ length: n }, (_, i) => {
     const [author, color] = COMMENTERS[Math.floor(rnd() * COMMENTERS.length)];
     const replies = rnd() > 0.6 ? [{

@@ -1,10 +1,22 @@
 # Lumen
 
-Lumen is a video sharing website in the style of YouTube, built with plain HTML, CSS and JavaScript. It has no dependencies, no build step and no server code. You can run it in a GitHub Codespace and publish it for free with GitHub Pages.
+Lumen is a video sharing website in the style of YouTube, built with plain HTML, CSS and JavaScript. It has no dependencies and no build step. You can run it in a GitHub Codespace, publish it for free with GitHub Pages, and connect it to a free Supabase database so people can share videos with each other.
 
-**Live site:** https://seb-simpson.github.io/Lumen-Claude/ (works once Pages is turned on; see [Publish with GitHub Pages](#publish-with-github-pages)).
+**Live site:** https://seb-simpson.github.io/Lumen-Claude/
 
-> **Demo only.** Accounts, comments, likes and uploads are saved **only in your browser** (localStorage and IndexedDB). Passwords are salted and hashed with SHA-256, but this is **not** real security, because there is no server. Don't reuse a real password.
+## Two modes
+
+Lumen runs in one of two modes, chosen by `src/js/config.js`:
+
+| | **Database mode** (this site) | **Browser-only demo mode** |
+| --- | --- | --- |
+| Turned on by | `SUPABASE_URL` and `SUPABASE_KEY` filled in | Both values left empty |
+| Accounts | Real accounts (email and password) handled by Supabase Auth | Demo accounts in this browser only (salted SHA-256; not real security) |
+| Uploads, comments, likes, subscriptions, playlists | Stored in Supabase and **shared with everyone**, on any device | Stored only in this browser |
+| Upload size | 50 MB (Supabase free plan) | 500 MB (browser storage permitting) |
+| Watch history, Watch later, settings | This browser | This browser |
+
+Setting up database mode takes about 5 minutes in the browser. See **[supabase/README.md](supabase/README.md)**.
 
 ## Features
 
@@ -67,8 +79,11 @@ src/js/
   app.js                Entry point: registers routes and global shortcuts
   router.js             Hash router (#/watch/abc) that updates the title and meta description
   store.js              localStorage wrapper with events, quota handling and an in-memory fallback
-  auth.js               Demo accounts (SHA-256 with a per-user salt, via Web Crypto)
-  db.js                 IndexedDB storage for uploads, with an in-memory fallback
+  config.js             Supabase URL and publishable key (empty = browser-only mode)
+  backend/supabase.js   Tiny Supabase client on fetch: auth with token refresh, tables, storage uploads
+  backend/remote.js     Lumen's shared data in Supabase (profiles, videos, comments, reactions, reports)
+  auth.js               Accounts: Supabase Auth, or demo accounts (salted SHA-256) in browser-only mode
+  db.js                 IndexedDB storage for uploads in browser-only mode
   library.js            Per-user history, likes, watch later, subscriptions, playlists, playback positions
   videos.js             Combines seed videos and uploads into one catalog; channel lookup
   search.js             Search and sort functions (no DOM, so they're easy to test)
@@ -79,6 +94,7 @@ src/js/
   components/           Header and sidebar (shell.js), player, comments, video card, icons, ui helpers
   views/                One file per page
 tests/                  Browser test runner (open /tests/); run-headless.sh runs it in CI
+supabase/               setup.sql (tables, storage, security rules), setup guide, and tests of the rules
 ```
 
 ## Decisions and notes
@@ -91,6 +107,9 @@ tests/                  Browser test runner (open /tests/); run-headless.sh runs
 - **Accessibility.** The site has a skip link, landmarks, labelled controls, visible focus rings and live regions for toasts and player status. Focus moves to each new page's heading on navigation, menus work with the arrow keys and Esc, and dialogs use the native `<dialog>` element. The color tokens were chosen for WCAG AA contrast in both themes, and `prefers-reduced-motion` turns animations off.
 - **"Live" videos are labelled as demos.** There is no streaming server, so items in the Live category are recorded clips. Cards say "Live demo", and the description explains it.
 - **Playlists always play through.** Inside a playlist the next video starts even when Autoplay is off, because "Play all" asks for that. Playlists are private to each account on the browser.
+- **Database without npm.** The Supabase client in `src/js/backend/supabase.js` is about 200 lines of plain `fetch`, not the official SDK, so the project still needs no npm. The publishable key in `config.js` is meant to be public. All protection comes from the Row Level Security rules in `supabase/setup.sql`, which are checked by 62 tests (`supabase/tests/`).
+- **What's shared and what isn't.** Accounts, uploads, comments, likes, subscriptions and playlists live in Supabase. Watch history, Watch later, playback positions and settings stay in each browser, so they're private and fast, and they don't use any database quota. Built-in sample videos stay in the site's files, but people's comments and likes on them are shared.
+- **Short CDN caching for uploads.** Uploaded files are cached for 5 minutes. On Supabase's free plan, the content delivery network keeps serving a file until its cache time runs out, even after it's deleted, so a long cache would keep deleted videos watchable.
 - **Seed numbers.** View counts, likes and dates in the sample data are fixed fake values. Views you add are counted per browser.
 
 ## Keyboard shortcuts
@@ -110,22 +129,35 @@ tests/                  Browser test runner (open /tests/); run-headless.sh runs
 
 ## Known limitations
 
-- **No real backend.** All data stays in one browser. Other people can't see your uploads or comments, and clearing your site data deletes everything.
+**Database mode**
+- **Free plan limits.** Each upload can be up to 50 MB, with about 1 GB of file storage in total. The Supabase project pauses after 7 days without visits. You can restore it with one click in the dashboard, and nothing is lost.
+- **No password reset yet.** Password reset emails aren't set up. The site owner can reset or delete accounts in the Supabase dashboard.
+- **Private videos aren't fully secret.** Private and unlisted videos are hidden from lists and search, and their details are protected by the database. But the video file itself sits in a public bucket under a random, unguessable name, so someone who already has the exact file link can still play it. Fixing this needs a private bucket with signed links.
+- **No rate limits or automatic moderation.** You moderate reports and remove content yourself (see [supabase/README.md](supabase/README.md#moderating-content)).
+- **No video processing.** Videos play exactly as uploaded: there's no transcoding and there are no quality options.
+
+**Browser-only mode**
+- **Nothing is shared.** All data stays in one browser. Other people can't see your uploads or comments, and clearing your site data deletes everything.
 - **Demo-only authentication.** Hashing in the browser stops passwords from being stored in plain text, but anyone with access to the device can read or change the data. Passwords can't be reset.
 - **Browser storage limits.** Large uploads can go over your browser's storage quota. When that happens, Lumen shows an error message. In some private browsing modes IndexedDB isn't available, so uploads only last until you close the tab.
+
+**Both modes**
 - **Hash URLs** (`#/watch/…`) don't get indexed as separate pages by search engines, and link previews show the site-wide Open Graph tags.
 - **No real live streaming.** "Live" videos are recorded clips, labelled as demos.
 - The duration of an upload is only shown if your browser can read the file's metadata.
 
-## Adding a real backend later
+## Database setup and next steps
 
-The data layer is kept in a few modules, so you can replace them without rewriting the pages:
+- **Set up or rebuild the database:** follow [supabase/README.md](supabase/README.md). It covers creating the project, running `setup.sql`, the two settings to change, and moderating content.
+- **Use a different Supabase project:** put its URL and publishable key in `src/js/config.js`, and replace the Supabase address in the Content-Security-Policy in `index.html` (`connect-src`, `img-src` and `media-src`).
+- **Go back to browser-only mode:** set both values in `src/js/config.js` to `''`.
 
-1. **Auth (`src/js/auth.js`).** Replace it with calls to a real identity provider, such as Supabase Auth, Firebase Auth, Auth0 or your own server using sessions in HttpOnly cookies. Hash passwords on the server with a slow algorithm such as Argon2id or bcrypt, never in the browser. Keep the same `currentUser / logIn / signUp / logOut / updateProfile` functions.
-2. **Videos (`src/js/videos.js`, `src/js/db.js`).** Upload files to object storage (S3, R2 or GCS) with pre-signed URLs. Then transcode them to HLS or DASH, for example with Mux, Cloudflare Stream or ffmpeg workers, and store the metadata in a database. `getPublicVideos`, `getVideo` and `saveUpload` become API calls.
-3. **Library and comments (`src/js/library.js`, `src/js/components/comments.js`).** Move them to API endpoints. Keep the escaping rules and add server-side validation, rate limits and moderation.
-4. **Security.** Send the CSP as an HTTP header instead of a meta tag, add `frame-ancestors 'none'`, protect cookie-based requests against CSRF, and update `connect-src` / `media-src` for your API and CDN hosts.
-5. **Routing.** If you move to a host that supports rewrites, you can switch to History API URLs (`/watch/abc`) for better SEO, and render pages on the server for link previews.
+Ideas for later:
+1. **Password reset and email confirmation.** Connect your own email service under Supabase → Authentication → Emails, turn "Confirm email" back on, and add a "Forgot password" page that uses `/auth/v1/recover`.
+2. **Truly private videos.** Move private uploads to a private bucket and play them through short-lived signed links.
+3. **Video processing.** Transcode uploads to HLS with several quality levels (for example Mux or Cloudflare Stream) and generate thumbnails automatically.
+4. **Security hardening.** Host the site somewhere that can send HTTP headers, so the CSP can include `frame-ancestors 'none'`, and add rate limits, for example with Supabase Edge Functions.
+5. **Better links and SEO.** On a host that supports rewrites, switch to History API URLs (`/watch/abc`) and render pages on the server for link previews.
 
 ## License
 

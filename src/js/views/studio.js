@@ -4,6 +4,7 @@ import { getMyUploads, updateUpload, removeUpload } from '../videos.js';
 import { CATEGORIES } from '../data/seed.js';
 import { toast, emptyState, openModal, confirmDialog, pageTitle, skeletonList } from '../components/ui.js';
 import { icon } from '../components/icons.js';
+import { REMOTE } from '../backend/remote.js';
 
 function editDialog(video, onSaved) {
   const title = h('input', { id: 'ed-title', type: 'text', maxlength: 100, required: true, value: video.title });
@@ -51,14 +52,14 @@ export async function render(ctx) {
     const vids = await getMyUploads();
     if (!ctx.isActive()) return;
     if (!vids.length) {
-      mount(body, emptyState({ iconName: 'video', title: 'No uploads yet', text: 'Videos you upload will appear here. They\'re stored in this browser using IndexedDB.', action: h('a', { class: 'btn btn-primary', href: '#/upload' }, 'Upload video') }));
+      mount(body, emptyState({ iconName: 'video', title: 'No uploads yet', text: REMOTE ? 'Videos you upload will appear here.' : 'Videos you upload will appear here. They\'re stored in this browser using IndexedDB.', action: h('a', { class: 'btn btn-primary', href: '#/upload' }, 'Upload video') }));
       return;
     }
     const totalViews = vids.reduce((n, v) => n + v.views, 0);
     mount(body,
       h('div', { class: 'stats' },
         h('div', { class: 'stat' }, h('span', { class: 'stat-num' }, String(vids.length)), h('span', { class: 'muted' }, 'Videos')),
-        h('div', { class: 'stat' }, h('span', { class: 'stat-num' }, totalViews.toLocaleString()), h('span', { class: 'muted' }, 'Views (this browser)'))),
+        h('div', { class: 'stat' }, h('span', { class: 'stat-num' }, totalViews.toLocaleString()), h('span', { class: 'muted' }, REMOTE ? 'Views' : 'Views (this browser)'))),
       h('div', { class: 'table-wrap' }, h('table', { class: 'studio-table' },
         h('caption', { class: 'visually-hidden' }, 'Your videos'),
         h('thead', {}, h('tr', {}, ['Video', 'Visibility', 'Date', 'Views', 'Actions'].map((t) => h('th', { scope: 'col' }, t)))),

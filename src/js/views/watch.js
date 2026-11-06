@@ -10,6 +10,9 @@ import { icon } from '../components/icons.js';
 import { navigate } from '../router.js';
 import { openSaveToPlaylist } from '../components/playlistDialog.js';
 import { playlistHref } from './playlists.js';
+import * as remote from '../backend/remote.js';
+import { auth } from '../auth.js';
+import { openModal } from '../components/ui.js';
 
 export function subscribeButton(channel, { onChange } = {}) {
   const btn = h('button', { class: 'btn', type: 'button' });
@@ -47,7 +50,7 @@ export async function render(ctx) {
   const channel = getChannel(video.channelId) || { id: video.channelId, name: 'Unknown channel', initial: '?', color: '#475569', subscribers: 0 };
   ctx.setMeta(video.title, (video.description || '').split('\n')[0].slice(0, 160));
 
-  addView(video.id);
+  if (video.remote) remote.incrementView(video.id); else addView(video.id);
   library.addToHistory(video.id);
   const settings = getSettings();
   const all = await getPublicVideos();
@@ -124,6 +127,10 @@ export async function render(ctx) {
   likeBtn.addEventListener('click', () => { const r = library.rate(video.id, 1); paintRating(); if (r === 1) toast('Added to Liked videos'); });
   dislikeBtn.addEventListener('click', () => { library.rate(video.id, -1); paintRating(); });
   paintRating();
+  if (remote.REMOTE) {
+    // Add other people's likes to the count (the current user's own like is added in paintRating).
+    remote.likesFromOthers(video.id).then((n) => { if (ctx.isActive()) { video.likes += n; paintRating(); } }).catch(() => {});
+  }
 
   const laterBtn = h('button', { class: 'btn btn-secondary', type: 'button' });
   const paintLater = () => {
@@ -167,6 +174,13 @@ export async function render(ctx) {
   const subCount = h('span', { class: 'muted small' });
   const paintSubs = () => { subCount.textContent = `${formatCount(channel.subscribers + (library.isSubscribed(channel.id) ? 1 : 0))} subscribers`; };
   paintSubs();
+  if (remote.REMOTE) {
+    remote.subscribersFromOthers(channel.id).then((n) => { if (ctx.isActive()) { channel.subscribers += n; paintSubs(); } }).catch(() => {});
+  }
+  const me = auth.currentUser();
+  const reportBtn = video.remote && video.ownerId !== me?.id
+    ? h('button', { class: 'btn btn-ghost', type: 'button', onClick: () => openReport(video) }, icon('info', { size: 20 }), h('span', {}, 'Report'))
+    : null;
 
   mount(ctx.outlet, h('div', { class: 'page watch' },
     h('div', { class: 'watch-main' },
@@ -180,9 +194,9 @@ export async function render(ctx) {
           subscribeButton(channel, { onChange: paintSubs })),
         h('div', { class: 'watch-actions' },
           h('div', { class: 'segmented', role: 'group', aria: { label: 'Rate this video' } }, likeBtn, dislikeBtn),
-          shareBtn, laterBtn, playlistBtn)),
+          shareBtn, laterBtn, playlistBtn, reportBtn)),
       desc,
-      commentsSection(video.id)),
+      commentsSection(video.id, { videoOwnerId: video.ownerId || null })),
     h('aside', { class: 'watch-side', aria: { label: plVideos ? 'Playlist and up next' : 'Up next' } },
       plVideos ? playlistPanel(playlist, plVideos, plIndex) : null,
       h('h2', { class: 'side-title' }, 'Up next'),
@@ -212,4 +226,31 @@ function playlistPanel(playlist, vids, current) {
     if (list && cur) list.scrollTop = cur.offsetTop - list.offsetTop - 8;
   });
   return panel;
+}
+
+/** Ask why a video is being reported, then send the report to the site owner. */
+function openReport(video) {
+  if (!auth.currentUser()) { toast('Sign in to report a video.'); location.hash = `#/login?next=${encodeURIComponent(`/watch/${video.id}`)}`; return; }
+  const reasons = ['Spam or misleading', 'Violent or harmful', 'Hateful or abusive', 'Sexual content', 'Copyright', 'Something else'];
+  const select = h('select', { id: 'report-reason' }, reasons.map((r) => h('option', { value: r }, r)));
+  const details = h('textarea', { id: 'report-details', rows: 3, maxlength: 400, placeholder: 'Optional details' });
+  const form = h('form', { id: 'report-form', onSubmit: async (e) => {
+    e.preventDefault();
+    const reason = [select.value, details.value.trim()].filter(Boolean).join(': ').slice(0, 500);
+    try {
+      await remote.reportVideo(video.id, reason);
+      m.close();
+      toast('Thanks — the report was sent to the site owner.', { type: 'success' });
+    } catch (err) { toast(err.message, { type: 'error' }); }
+  } },
+  h('div', { class: 'field' }, h('label', { for: 'report-reason' }, 'What\'s wrong with this video?'), select),
+  h('div', { class: 'field' }, h('label', { for: 'report-details' }, 'Details'), details));
+  const m = openModal({
+    title: 'Report video', body: form,
+    actions: [
+      h('button', { class: 'btn btn-ghost', type: 'button', onClick: () => m.close() }, 'Cancel'),
+      h('button', { class: 'btn btn-primary', type: 'submit', form: 'report-form' }, 'Send report'),
+    ],
+  });
+  select.focus();
 }
