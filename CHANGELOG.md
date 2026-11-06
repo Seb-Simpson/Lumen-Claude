@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-06
+
+### Fixed
+- Like buttons were confusing: the thumb icon looked filled whether or not you'd liked something, so a like from someone else looked like your own. Now an outline thumb means "not liked" and a filled, coloured thumb means "you liked this" (videos and comments).
+- You can now reply to the built-in sample comments in database mode. This needs `supabase/setup.sql` to be re-run once, which adds a `seed_parent_id` column.
+- In database mode, liking a video or comment asks you to sign in, so guest likes aren't silently kept in one browser.
+
 ## [1.2.0] - 2026-11-06
 
 ### Added

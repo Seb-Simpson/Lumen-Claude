@@ -103,6 +103,19 @@ create table if not exists public.comments (
 );
 create index if not exists comments_video_idx on public.comments (video_id, created_at desc);
 
+-- Replies to the built-in sample comments (ids like "v-aurora-c0"), which
+-- aren't stored in the database. Added in v1.3; safe to run on older setups.
+alter table public.comments add column if not exists seed_parent_id text
+  check (seed_parent_id ~ '^v-[a-z0-9-]+-c[0-9]+$');
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'comments_single_parent') then
+    alter table public.comments add constraint comments_single_parent
+      check (parent_id is null or seed_parent_id is null);
+  end if;
+end;
+$$;
+
 create table if not exists public.comment_likes (
   comment_id uuid not null references public.comments (id) on delete cascade,
   user_id    uuid not null default auth.uid() references public.profiles (id) on delete cascade,
@@ -173,6 +186,10 @@ language plpgsql
 set search_path = ''
 as $$
 begin
+  if new.seed_parent_id is not null
+     and left(new.seed_parent_id, char_length(new.video_id) + 2) <> new.video_id || '-c' then
+    raise exception 'Replies can only be one level deep, on the same video';
+  end if;
   if new.parent_id is not null and not exists (
     select 1 from public.comments p
     where p.id = new.parent_id and p.parent_id is null and p.video_id = new.video_id
@@ -260,7 +277,7 @@ revoke insert, update on public.video_ratings from anon, authenticated;
 revoke insert, update on public.subscriptions from anon, authenticated;
 revoke insert, update on public.reports       from anon, authenticated;
 revoke insert, update on public.playlists     from anon, authenticated;
-grant insert (video_id, parent_id, body)  on public.comments      to authenticated;
+grant insert (video_id, parent_id, seed_parent_id, body) on public.comments to authenticated;
 grant insert (comment_id)                 on public.comment_likes to authenticated;
 grant insert (video_id, value)            on public.video_ratings to authenticated;
 grant update (value)                      on public.video_ratings to authenticated;

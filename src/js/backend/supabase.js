@@ -30,6 +30,7 @@ export function friendlyError(status, body = {}) {
   else if (code === '42501' || status === 403 || lower.includes('row-level security')) message = 'You don\'t have permission to do that.';
   else if (status === 413 || lower.includes('maximum allowed size') || lower.includes('payload too large')) message = 'That file is too large for the server (50 MB maximum).';
   else if (lower.includes('mime type') || lower.includes('invalid_mime_type')) message = 'That file type isn\'t allowed.';
+  else if (code === 'PGRST204' && lower.includes('seed_parent_id')) message = 'Replying to sample comments needs a quick database update. The site owner should re-run supabase/setup.sql.';
   else if (lower.includes('jwt expired')) message = 'Your session expired. Please sign in again.';
   return new SupabaseError(message, { status, code, details: raw });
 }

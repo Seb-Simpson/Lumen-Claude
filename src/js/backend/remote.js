@@ -204,16 +204,21 @@ export const incrementView = (id) => (isUuid(id) ? sb.rpc('increment_view', { vi
 const toComment = (c, likeCounts) => {
   const a = c.author || profiles.get(c.author_id) || {};
   return {
-    id: c.id, parentId: c.parent_id, userId: c.author_id,
+    id: c.id, parentId: c.parent_id || c.seed_parent_id || null, userId: c.author_id,
     author: a.display_name || 'Deleted user', initial: a.initial || '?', color: a.color || '#475569',
     text: c.body, createdAt: c.created_at, likes: likeCounts[c.id] || 0, replies: [],
   };
 };
 
-/** Comments for a video, newest first, with replies nested one level. */
+/**
+ * Comments for a video, newest first, with replies nested one level.
+ * Returns { top, sampleReplies }: sampleReplies maps a built-in sample
+ * comment id (e.g. "v-aurora-c0") to the replies people posted under it.
+ */
 export async function fetchComments(videoId) {
+  // "*" rather than a column list, so older databases without seed_parent_id still load.
   const rows = await sb.select('comments',
-    `video_id=eq.${encodeURIComponent(videoId)}&select=id,parent_id,body,created_at,author_id,author:profiles!comments_author_id_fkey(display_name,initial,color)&order=created_at.desc&limit=500`);
+    `video_id=eq.${encodeURIComponent(videoId)}&select=*,author:profiles!comments_author_id_fkey(display_name,initial,color)&order=created_at.desc&limit=500`);
   const likeCounts = {};
   if (rows.length) {
     const likes = await sb.select('comment_likes', `comment_id=${inList(rows.map((r) => r.id))}&select=comment_id${notMe()}`);
@@ -222,16 +227,22 @@ export async function fetchComments(videoId) {
   const all = rows.map((r) => toComment(r, likeCounts));
   const byId = new Map(all.map((c) => [c.id, c]));
   const top = [];
+  const sampleReplies = {};
   for (const c of all) {
-    if (c.parentId && byId.has(c.parentId)) byId.get(c.parentId).replies.unshift(c); // replies oldest first
-    else if (!c.parentId) top.push(c);
+    if (!c.parentId) top.push(c);
+    else if (byId.has(c.parentId)) byId.get(c.parentId).replies.unshift(c); // replies oldest first
+    else if (!isUuid(c.parentId)) (sampleReplies[c.parentId] ||= []).unshift(c);
   }
-  return top;
+  return { top, sampleReplies };
 }
 
 export async function addComment(videoId, text, parentId = null) {
-  const [row] = await sb.insert('comments', [{ video_id: videoId, body: text, parent_id: parentId }]);
-  return toComment(row, {});
+  // Replies to built-in sample comments use seed_parent_id (they aren't in the database).
+  const row = parentId && !isUuid(parentId)
+    ? { video_id: videoId, body: text, seed_parent_id: parentId }
+    : { video_id: videoId, body: text, parent_id: parentId };
+  const [saved] = await sb.insert('comments', [row]);
+  return toComment(saved, {});
 }
 
 export async function deleteComment(id) {

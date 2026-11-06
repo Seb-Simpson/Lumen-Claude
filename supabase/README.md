@@ -22,6 +22,7 @@ Supabase is a free online database. Connecting it lets people share uploads, com
 5. You should see **"Success. No rows returned"**.
    - If Supabase warns that the query includes "destructive operations", that's caused by the lines that safely replace older copies of the rules. Click **Run this query** to continue.
    - Running the script again later is safe. It never deletes your data.
+   - **Updating:** when Lumen's changelog says the database needs an update, repeat these steps with the latest `setup.sql`.
 
 ## 3. Two settings
 

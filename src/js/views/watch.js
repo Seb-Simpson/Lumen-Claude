@@ -112,20 +112,28 @@ export async function render(ctx) {
 
   // --- Actions ---
   const likeCount = h('span', {});
-  const likeBtn = h('button', { class: 'seg-btn', type: 'button' }, icon('like', { size: 20 }), likeCount);
-  const dislikeBtn = h('button', { class: 'seg-btn', type: 'button', aria: { label: 'Dislike this video' } }, icon('dislike', { size: 20 }));
+  const likeIcon = h('span', { class: 'seg-icon' });
+  const dislikeIcon = h('span', { class: 'seg-icon' });
+  const likeBtn = h('button', { class: 'seg-btn', type: 'button' }, likeIcon, likeCount);
+  const dislikeBtn = h('button', { class: 'seg-btn', type: 'button', aria: { label: 'Dislike this video' } }, dislikeIcon);
   const paintRating = () => {
     const r = library.rating(video.id);
+    // Outline = not chosen; filled and coloured = your choice.
+    likeIcon.replaceChildren(icon(r === 1 ? 'like' : 'likeOutline', { size: 20 }));
+    dislikeIcon.replaceChildren(icon(r === -1 ? 'dislike' : 'dislikeOutline', { size: 20 }));
+    likeBtn.title = r === 1 ? 'You liked this' : 'I like this';
+    dislikeBtn.title = r === -1 ? 'You disliked this' : 'I dislike this';
     likeBtn.classList.toggle('active', r === 1);
     dislikeBtn.classList.toggle('active', r === -1);
     likeBtn.setAttribute('aria-pressed', String(r === 1));
     dislikeBtn.setAttribute('aria-pressed', String(r === -1));
     const n = video.likes + (r === 1 ? 1 : 0);
     likeCount.textContent = formatCount(n);
-    likeBtn.setAttribute('aria-label', `Like this video along with ${n.toLocaleString()} other people`);
+    likeBtn.setAttribute('aria-label', `Like this video (${n.toLocaleString()} ${n === 1 ? 'like' : 'likes'})`);
   };
-  likeBtn.addEventListener('click', () => { const r = library.rate(video.id, 1); paintRating(); if (r === 1) toast('Added to Liked videos'); });
-  dislikeBtn.addEventListener('click', () => { library.rate(video.id, -1); paintRating(); });
+  const needSignIn = () => { if (remote.REMOTE && !auth.currentUser()) { toast('Sign in to like videos.'); return true; } return false; };
+  likeBtn.addEventListener('click', () => { if (needSignIn()) return; const r = library.rate(video.id, 1); paintRating(); if (r === 1) toast('Added to Liked videos'); });
+  dislikeBtn.addEventListener('click', () => { if (needSignIn()) return; library.rate(video.id, -1); paintRating(); });
   paintRating();
   if (remote.REMOTE) {
     // Add other people's likes to the count (the current user's own like is added in paintRating).

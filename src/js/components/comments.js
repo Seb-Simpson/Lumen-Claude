@@ -17,7 +17,11 @@ const userKey = (videoId) => `comments:${videoId}`;
 
 /** All comments for a video: people's comments (newest first), then the samples. */
 export async function getComments(videoId) {
-  if (remote.REMOTE) return [...await remote.fetchComments(videoId), ...seedComments(videoId)];
+  if (remote.REMOTE) {
+    const { top, sampleReplies } = await remote.fetchComments(videoId);
+    const samples = seedComments(videoId).map((c) => ({ ...c, replies: [...c.replies, ...(sampleReplies[c.id] || [])] }));
+    return [...top, ...samples];
+  }
   const local = store.get(userKey(videoId), { top: [], replies: {} });
   const seeds = seedComments(videoId);
   const all = [...local.top, ...seeds];
@@ -75,19 +79,26 @@ function composer({ placeholder, submitLabel, onSubmit, onCancel, autofocus = fa
 
 function commentItem(videoId, c, { isReply = false, rerender, videoOwnerId }) {
   const me = auth.currentUser();
-  // Sample comments can't be replied to on the server (they aren't stored there).
-  const canReply = !isReply && (!remote.REMOTE || remote.isUuid(c.id));
+  const canReply = !isReply;
   const canDelete = remote.REMOTE && me && remote.isUuid(c.id) && (c.userId === me.id || videoOwnerId === me.id);
   const liked = library.commentLiked(c.id);
+  // Outline thumb = you haven't liked it; filled, coloured thumb = you have.
+  const paintLike = (on) => {
+    likeBtn.classList.toggle('active', on);
+    likeBtn.setAttribute('aria-pressed', String(on));
+    likeBtn.title = on ? 'You liked this' : 'Like';
+    likeBtn.replaceChildren(icon(on ? 'like' : 'likeOutline', { size: 18 }));
+  };
   const likeBtn = h('button', {
-    class: `chip-btn ${liked ? 'active' : ''}`, type: 'button', aria: { pressed: String(liked), label: `Like comment by ${c.author}` },
+    class: 'chip-btn', type: 'button', aria: { label: `Like comment by ${c.author}` },
     onClick: () => {
+      if (remote.REMOTE && !me) { toast('Sign in to like comments.'); return; }
       const now = library.toggleCommentLike(c.id);
-      likeBtn.classList.toggle('active', now);
-      likeBtn.setAttribute('aria-pressed', String(now));
+      paintLike(now);
       count.textContent = formatCount(c.likes + (now ? 1 : 0));
     },
-  }, icon('like', { size: 18 }));
+  });
+  paintLike(liked);
   const count = h('span', { class: 'like-count' }, formatCount(c.likes + (liked ? 1 : 0)));
   const replySlot = h('div', { class: 'reply-slot' });
 

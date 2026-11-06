@@ -186,3 +186,4 @@
   .pl-row { grid-template-columns: 1fr; }
   .pl-row > .pl-index { display: none; }
 }
+.seg-icon { display: inline-flex; }
